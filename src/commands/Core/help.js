@@ -1,3 +1,49 @@
+import {
+    SlashCommandBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+} from "discord.js";
+import { InteractionHelper } from '../../utils/interactionHelper.js';
+import { createEmbed } from "../../utils/embeds.js";
+import {
+    createSelectMenu,
+} from "../../utils/components.js";
+import fs from "fs/promises";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const CATEGORY_SELECT_ID = "help-category-select";
+const ALL_COMMANDS_ID = "help-all-commands";
+const BUG_REPORT_BUTTON_ID = "help-bug-report";
+const HELP_MENU_TIMEOUT_MS = 5 * 60 * 1000;
+
+const CATEGORY_ICONS = {
+    Core: "ℹ️",
+    Moderation: "🛡️",
+    Economy: "💰",
+    Fun: "🎮",
+    Leveling: "📊",
+    Utility: "🔧",
+    Ticket: "🎫",
+    Welcome: "👋",
+    Giveaway: "🎉",
+    Counter: "🔢",
+    Tools: "🛠️",
+    Search: "🔍",
+    Reaction_Roles: "🎭",
+    Community: "👥",
+    Birthday: "🎂",
+    Config: "⚙️",
+};
+
+
+
+
+
 async function createInitialHelpMenu() {
     const commandsPath = path.join(__dirname, "../../commands");
     const categoryDirs = (
@@ -10,95 +56,178 @@ async function createInitialHelpMenu() {
     const options = [
         {
             label: "📋 All Commands",
-            description: "View every available command",
+            description: "View all available commands with pagination",
             value: ALL_COMMANDS_ID,
         },
         ...categoryDirs.map((category) => {
             const categoryName =
                 category.charAt(0).toUpperCase() +
                 category.slice(1).toLowerCase();
-            const icon = CATEGORY_ICONS[categoryName] || "🔹";
+            const icon = CATEGORY_ICONS[categoryName] || "🔍";
             return {
                 label: `${icon} ${categoryName}`,
-                description: `Open ${categoryName} commands`,
+                description: `View commands in the ${categoryName} category`,
                 value: category,
             };
         }),
     ];
 
-    // 🔥 MAIN EMBED (Dashboard Style)
-    const embed = createEmbed({
-        title: "⚡ Frontiers Dashboard",
-        description:
-            "Control your server with a **modern all-in-one system**.\n" +
-            "Everything you need is organized below.\n\n" +
-            "```Select a category to begin```",
-        color: "primary",
+    const embed = createEmbed({ 
+        title: "🤖 Frontiers Help Center",
+        description: "Your all-in-one Discord companion for moderation, economy, fun, and server management.",
+        color: 'primary'
     });
 
     embed.addFields(
         {
-            name: "🧭 Core",
-            value: "🛡️ Moderation\n💰 Economy\n🎮 Fun\n📊 Leveling",
-            inline: true,
+            name: "🛡️ **Moderation**",
+            value: "Server moderation, user management, and enforcement tools",
+            inline: true
         },
         {
-            name: "⚙️ System",
-            value: "🎫 Tickets\n👋 Welcome\n🎭 Roles\n🔢 Counters",
-            inline: true,
+            name: "💰 **Economy**",
+            value: "Currency system, shops, and virtual economy",
+            inline: true
         },
         {
-            name: "🌐 Community",
-            value: "👥 Community\n🎂 Birthdays\n🎉 Giveaways\n🔍 Search",
-            inline: true,
+            name: "🎮 **Fun**",
+            value: "Games, entertainment, and interactive commands",
+            inline: true
         },
         {
-            name: "🚀 Actions",
-            value:
-                "• View all commands\n" +
-                "• Report bugs\n" +
-                "• Get support instantly",
-            inline: false,
+            name: "📊 **Leveling**",
+            value: "User levels, XP system, and progression tracking",
+            inline: true
+        },
+        {
+            name: "🎫 **Tickets**",
+            value: "Support ticket system for server management",
+            inline: true
+        },
+        {
+            name: "🎉 **Giveaways**",
+            value: "Automated giveaway management and distribution",
+            inline: true
+        },
+        {
+            name: "👋 **Welcome**",
+            value: "Member welcome messages and onboarding",
+            inline: true
+        },
+        {
+            name: "🎂 **Birthdays**",
+            value: "Birthday tracking and celebration features",
+            inline: true
+        },
+        {
+            name: "👥 **Community**",
+            value: "Community tools, applications, and member engagement",
+            inline: true
+        },
+        {
+            name: "⚙️ **Config**",
+            value: "Server and bot configuration management commands",
+            inline: true
+        },
+        {
+            name: "🔢 **Counter**",
+            value: "Live counter channel setup and counter controls",
+            inline: true
+        },
+        {
+            name: "🎙️ **Join to Create**",
+            value: "Dynamic voice channel creation and management",
+            inline: true
+        },
+        {
+            name: "🎭 **Reaction Roles**",
+            value: "Self-assignable roles using reaction-role systems",
+            inline: true
+        },
+        {
+            name: "✅ **Verification**",
+            value: "Member verification workflows and access gating",
+            inline: true
+        },
+        {
+            name: "🔧 **Utilities**",
+            value: "Useful tools and server utilities",
+            inline: true
         }
     );
 
-    embed.setFooter({
-        text: "Frontiers • Unified Command System",
+    embed.setFooter({ 
+        text: "Frontiers Competitive League" 
     });
     embed.setTimestamp();
 
-    // 🎯 SINGLE CLEAN BUTTON ROW
-    const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId(ALL_COMMANDS_ID)
-            .setLabel("All Commands")
-            .setStyle(ButtonStyle.Primary),
+    const bugReportButton = new ButtonBuilder()
+        .setCustomId(BUG_REPORT_BUTTON_ID)
+        .setLabel("Report Bug")
+        .setStyle(ButtonStyle.Danger);
 
-        new ButtonBuilder()
-            .setCustomId(BUG_REPORT_BUTTON_ID)
-            .setLabel("Bug")
-            .setStyle(ButtonStyle.Danger),
+    const supportButton = new ButtonBuilder()
+        .setLabel("Need help?")
+        .setURL("https://discord.com/channels/1481587512534106134/1486750183629783262")
+        .setStyle(ButtonStyle.Link);
 
-        new ButtonBuilder()
-            .setLabel("Support")
-            .setURL("https://discord.com/channels/1481587512534106134/1486750183629783262")
-            .setStyle(ButtonStyle.Link),
+    const touchpointButton = new ButtonBuilder()
+        .setLabel("Server Info?")
+        .setURL("https://discord.com/channels/1481587512534106134/1493875742910447636")
+        .setStyle(ButtonStyle.Link);
 
-        new ButtonBuilder()
-            .setLabel("Info")
-            .setURL("https://discord.com/channels/1481587512534106134/1493875742910447636")
-            .setStyle(ButtonStyle.Link)
-    );
-
-    // 📂 DROPDOWN
     const selectRow = createSelectMenu(
         CATEGORY_SELECT_ID,
-        "Browse command categories...",
-        options
+        "Select to view the commands",
+        options,
     );
+
+    const buttonRow = new ActionRowBuilder().addComponents([
+        bugReportButton,
+        supportButton,
+        touchpointButton,
+    ]);
 
     return {
         embeds: [embed],
-        components: [selectRow, row], // clean order
+        components: [buttonRow, selectRow],
     };
 }
+
+export default {
+    data: new SlashCommandBuilder()
+        .setName("help")
+        .setDescription("Displays the help menu with all available commands"),
+
+    async execute(interaction, guildConfig, client) {
+        
+        const { MessageFlags } = await import('discord.js');
+        await InteractionHelper.safeDefer(interaction);
+        
+        const { embeds, components } = await createInitialHelpMenu();
+
+        await InteractionHelper.safeEditReply(interaction, {
+            embeds,
+            components,
+        });
+
+        setTimeout(async () => {
+            try {
+                const closedEmbed = createEmbed({
+                    title: "Help menu closed",
+                    description: "Help menu has been closed, use /help again.",
+                    color: "secondary",
+                });
+
+                await InteractionHelper.safeEditReply(interaction, {
+                    embeds: [closedEmbed],
+                    components: [],
+                });
+            } catch (error) {
+                
+            }
+        }, HELP_MENU_TIMEOUT_MS);
+    },
+};
+
+
