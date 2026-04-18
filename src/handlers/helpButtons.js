@@ -65,7 +65,7 @@ async function createCategorySelectMenu() {
     ];
 
     const embed = createEmbed({
-        title: "🤖 TitanBot Help Center",
+        title: "🤖 Frontiers Help Center",
         description: "Your all-in-one Discord companion for moderation, economy, fun, and server management.\n\nSelect a category below to explore our powerful commands:",
         color: 'primary'
     });
@@ -119,7 +119,7 @@ async function createCategorySelectMenu() {
     );
 
     embed.setFooter({
-        text: "Made with ❤️"
+        text: "Frontiers Entertainment (by Alpy)"
     });
     embed.setTimestamp();
 
@@ -130,12 +130,12 @@ async function createCategorySelectMenu() {
 
     const supportButton = new ButtonBuilder()
         .setLabel("Support Server")
-        .setURL("https://discord.gg/QnWNz2dKCE")
+        .setURL("http://dsc.gg/frontierscompetitive")
         .setStyle(ButtonStyle.Link);
 
     const touchpointButton = new ButtonBuilder()
-        .setLabel("Learn from Touchpoint")
-        .setURL("https://www.youtube.com/@TouchDisc")
+        .setLabel("Learn from Alpy")
+        .setURL("http://dsc.gg/frontierscompetitive")
         .setStyle(ButtonStyle.Link);
 
     const selectRow = createSelectMenu(
@@ -189,15 +189,15 @@ export const helpBugReportButton = {
     name: BUG_REPORT_BUTTON_ID,
     async execute(interaction, client) {
         const githubButton = new ButtonBuilder()
-            .setLabel('🐛 Report Bug on GitHub')
+            .setLabel('🐛 Bugs? Do /bug or create a ticket to report them')
             .setStyle(ButtonStyle.Link)
-            .setURL('https://github.com/codebymitch/TitanBot/issues');
+            .setURL('http://dsc.gg/frontierscompetitive');
 
         const bugRow = new ActionRowBuilder().addComponents(githubButton);
 
         const bugReportEmbed = createEmbed({
             title: '🐛 Bug Report',
-            description: 'Found a bug? Please report it on our GitHub Issues page!\n\n' +
+            description: 'Found a bug? Please report it on our bug reporting system or dm high ranks\n\n' +
                 '**When reporting a bug, please include:**\n' +
                 '• 📝 Detailed description of the issue\n' +
                 '• 📋 Steps to reproduce the problem\n' +
@@ -207,7 +207,7 @@ export const helpBugReportButton = {
             color: 'error'
         });
         bugReportEmbed.setFooter({
-            text: 'TitanBot Bug Reporting System',
+            text: 'Frontiers Bug Reporting System',
             iconURL: client.user.displayAvatarURL()
         });
         bugReportEmbed.setTimestamp();
