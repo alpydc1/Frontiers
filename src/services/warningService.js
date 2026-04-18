@@ -1,101 +1,151 @@
-import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
-import { successEmbed } from '../../utils/embeds.js';
-import { logModerationAction } from '../../utils/moderation.js';
-import { logger } from '../../utils/logger.js';
-import { WarningService } from '../../services/warningService.js';
-import { handleInteractionError } from '../../utils/errorHandler.js';
-import { InteractionHelper } from '../../utils/interactionHelper.js';
+import { getFromDb, setInDb } from '../utils/database.js';
+import { logger } from '../utils/logger.js';
 
-export default {
-  data: new SlashCommandBuilder()
-    .setName('warn')
-    .setDescription('Warn a user')
-    .addUserOption((o) =>
-      o.setName('target').setRequired(true).setDescription('User to warn'),
-    )
-    .addStringOption((o) =>
-      o.setName('reason').setRequired(true).setDescription('Reason for the warning'),
-    )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
-  category: 'moderation',
-
-  async execute(interaction, config, client) {
-    const deferSuccess = await InteractionHelper.safeDefer(interaction);
-    if (!deferSuccess) {
-      logger.warn('Warn interaction defer failed', {
-        userId: interaction.user.id,
-        guildId: interaction.guildId,
-        commandName: 'warn',
-      });
-      return;
-    }
-
+export class WarningService {
+  /**
+   * Add a warning to a user in a guild.
+   */
+  static async addWarning({
+    guildId,
+    userId,
+    moderatorId,
+    reason,
+    timestamp = Date.now()
+  }) {
     try {
-      if (!interaction.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
-        throw new Error('You need the `Moderate Members` permission to issue warnings.');
+      const key = `moderation:warnings:${guildId}:${userId}`;
+      const warnings = await getFromDb(key, []);
+
+      if (!Array.isArray(warnings)) {
+        logger.warn(`Warnings for ${userId} in ${guildId} corrupted, resetting`);
+        await setInDb(key, []);
+        return { success: false, error: 'Corrupted data' };
       }
 
-      const target = interaction.options.getUser('target');
-      const member = interaction.options.getMember('target');
-      const reason = interaction.options.getString('reason');
-      const moderator = interaction.user;
-      const guildId = interaction.guildId;
-
-      if (!member) {
-        throw new Error('The target user is not currently in this server.');
-      }
-
-      if (target.bot) {
-        throw new Error('You cannot warn a bot.');
-      }
-
-      if (target.id === moderator.id) {
-        throw new Error('You cannot warn yourself.');
-      }
-
-      const result = await WarningService.addWarning({
+      const warning = {
+        id: Date.now(),
         guildId,
-        userId: target.id,
-        moderatorId: moderator.id,
+        userId,
+        moderatorId,
         reason,
-        timestamp: Date.now(),
-      });
+        timestamp,
+        status: 'active'
+      };
 
-      if (!result.success) {
-        throw new Error('Failed to store warning in database.');
+      warnings.push(warning);
+      await setInDb(key, warnings);
+
+      logger.info(`Warning added: ${userId} in ${guildId} by ${moderatorId}`);
+
+      return {
+        success: true,
+        id: warning.id,
+        totalCount: warnings.filter(w => w.status !== 'deleted').length
+      };
+    } catch (error) {
+      logger.error('Error adding warning:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Get all active warnings for a user in a guild.
+   */
+  static async getWarnings(guildId, userId) {
+    try {
+      const key = `moderation:warnings:${guildId}:${userId}`;
+      const warnings = await getFromDb(key, []);
+
+      return Array.isArray(warnings)
+        ? warnings.filter(w => w && w.status !== 'deleted')
+        : [];
+    } catch (error) {
+      logger.error('Error fetching warnings:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get the count of active warnings for a user in a guild.
+   */
+  static async getWarningCount(guildId, userId) {
+    const warnings = await this.getWarnings(guildId, userId);
+    return warnings.length;
+  }
+
+  /**
+   * Remove a specific warning by ID from a user in a guild.
+   */
+  static async removeWarning(guildId, userId, warningId) {
+    try {
+      const key = `moderation:warnings:${guildId}:${userId}`;
+      const warnings = await getFromDb(key, []);
+
+      if (!Array.isArray(warnings)) {
+        return { success: false, error: 'Invalid warning data structure.' };
       }
 
-      const totalWarns = result.totalCount;
+      // Use loose equality to handle String vs Number IDs
+      const warning = warnings.find(w => w.id == warningId);
 
-      await logModerationAction({
-        client,
-        guild: interaction.guild,
-        event: {
-          action: 'User Warned',
-          target: `${target.tag} (${target.id})`,
-          executor: `${moderator.tag} (${moderator.id})`,
-          reason,
-          metadata: {
-            userId: target.id,
-            moderatorId: moderator.id,
-            totalWarns,
-            warningNumber: totalWarns,
-            warningId: result.id,
-          },
-        },
-      });
+      if (!warning) {
+        return { success: false, error: 'Warning not found in database.' };
+      }
 
-      await InteractionHelper.safeEditReply(interaction, {
-        embeds: [
-          successEmbed(
-            `⚠️ **Warned** ${target.tag}`,
-            `**Reason:** ${reason}\n**Warning ID:** \`${result.id}\`\n**Total Warns:** ${totalWarns}`,
-          ),
-        ],
-      });
+      if (warning.status === 'deleted') {
+        return { success: false, error: 'This warning has already been removed.' };
+      }
+
+      warning.status = 'deleted';
+      await setInDb(key, warnings);
+
+      logger.info(`Warning removed: ${warningId} for ${userId} in ${guildId}`);
+
+      return {
+        success: true,
+        removedId: warningId
+      };
     } catch (error) {
-      logger.error('Warn command error:', error);
-      await handleInteractionError(interaction, error, { subtype: 'warn_failed' });
+      logger.error('Error removing warning:', error);
+      return { success: false, error: error.message };
     }
-  },
-};
+  }
+
+  /**
+   * Clear all warnings for a user in a guild.
+   */
+  static async clearWarnings(guildId, userId) {
+    try {
+      const key = `moderation:warnings:${guildId}:${userId}`;
+      const warnings = await getFromDb(key, []);
+
+      const activeCount = Array.isArray(warnings)
+        ? warnings.filter(w => w.status !== 'deleted').length
+        : 0;
+
+      await setInDb(key, []);
+
+      logger.info(`Warnings cleared for ${userId} in ${guildId} (${activeCount} removed)`);
+      return { success: true, count: activeCount };
+    } catch (error) {
+      logger.error('Error clearing warnings:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Get all warnings across a guild (by all users).
+   * Note: Requires database to support prefix/list queries.
+   */
+  static async getGuildWarnings(guildId, filters = {}) {
+    try {
+      const { limit = 100 } = filters;
+      const allWarnings = [];
+      logger.debug(`Fetched guild warnings for ${guildId} with ${allWarnings.length} total`);
+      return allWarnings.slice(0, limit);
+    } catch (error) {
+      logger.error('Error fetching guild warnings:', error);
+      return [];
+    }
+  }
+}
