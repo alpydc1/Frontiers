@@ -1,53 +1,75 @@
-import { SlashCommandBuilder } from "discord.js";
-import { WarningService } from "../../services/warningService.js";
-import { createEmbed } from "../../utils/embeds.js";
+import { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } from 'discord.js';
+import { WarningService } from '../../services/warningService.js';
+import { createEmbed } from '../../utils/embeds.js';
+import { logger } from '../../utils/logger.js';
+import { handleInteractionError } from '../../utils/errorHandler.js';
 
 export default {
   data: new SlashCommandBuilder()
-    .setName("removewarning")
-    .setDescription("Remove a specific warning from a user")
-    .addUserOption(option =>
-      option.setName("user")
-        .setDescription("User to remove warning from")
-        .setRequired(true)
+    .setName('removewarning')
+    .setDescription('Remove a specific warning from a user')
+    .addUserOption((option) =>
+      option.setName('user').setDescription('User to remove warning from').setRequired(true),
     )
-    .addStringOption(option =>
-      option.setName("id")
-        .setDescription("Warning ID")
-        .setRequired(true)
-    ),
+    .addStringOption((option) =>
+      option
+        .setName('id')
+        .setDescription('Warning ID (shown in /warnings)')
+        .setRequired(true),
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+  category: 'moderation',
 
   async execute(interaction) {
-    const user = interaction.options.getUser("user");
-    const warningId = Number(interaction.options.getString("id"));
+    try {
+      const user = interaction.options.getUser('user');
+      const rawId = interaction.options.getString('id');
+      const warningId = Number(rawId);
 
-    const result = await WarningService.removeWarning(
-      interaction.guild.id,
-      user.id,
-      warningId
-    );
+      if (isNaN(warningId)) {
+        return interaction.reply({
+          embeds: [
+            createEmbed({
+              title: '❌ Invalid ID',
+              description: 'Please provide a valid warning ID. You can find IDs using `/warnings`.',
+              color: 'danger',
+            }),
+          ],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
 
-    if (!result.success) {
+      const result = await WarningService.removeWarning(
+        interaction.guild.id,
+        user.id,
+        warningId,
+      );
+
+      if (!result.success) {
+        return interaction.reply({
+          embeds: [
+            createEmbed({
+              title: '❌ Failed',
+              description: result.error,
+              color: 'danger',
+            }),
+          ],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
       return interaction.reply({
         embeds: [
           createEmbed({
-            title: "❌ Failed",
-            description: result.error,
-            color: "danger"
-          })
+            title: '✅ Warning Removed',
+            description: `Removed warning \`${warningId}\` from ${user}.`,
+            color: 'success',
+          }),
         ],
-        ephemeral: true
       });
+    } catch (error) {
+      logger.error('Removewarning command error:', error);
+      await handleInteractionError(interaction, error, { subtype: 'removewarning_failed' });
     }
-
-    return interaction.reply({
-      embeds: [
-        createEmbed({
-          title: "✅ Warning Removed",
-          description: `Removed warning **${warningId}** from ${user}`,
-          color: "success"
-        })
-      ]
-    });
-  }
+  },
 };
