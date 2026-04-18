@@ -101,19 +101,43 @@ export class WarningService {
 
 
   static async removeWarning(guildId, userId, warningId) {
-  try {
-    const key = `moderation:warnings:${guildId}:${userId}`;
-    const warnings = await getFromDb(key, []);
+    try {
+      const key = `moderation:warnings:${guildId}:${userId}`;
+      const warnings = await getFromDb(key, []);
 
-    if (!Array.isArray(warnings)) {
-      return { success: false, error: "Invalid warning data" };
+      if (!Array.isArray(warnings)) {
+        return { success: false, error: "Invalid warning data structure." };
+      }
+
+      // FIX: Using loose equality (==) to handle String vs Number IDs
+      const warning = warnings.find(w => w.id == warningId);
+
+      if (!warning) {
+        return { success: false, error: "Warning not found in database." };
+      }
+
+      if (warning.status === "deleted") {
+        return { success: false, error: "This warning has already been removed." };
+      }
+
+      // Mark as deleted
+      warning.status = "deleted";
+
+      // Save back to DB
+      await setInDb(key, warnings);
+
+      logger.info(`Warning removed: ${warningId} for ${userId} in ${guildId}`);
+
+      return { 
+        success: true, 
+        removedId: warningId 
+      };
+    } catch (error) {
+      // This will now log the EXACT error to your console
+      logger.error("CRITICAL DATABASE ERROR:", error);
+      return { success: false, error: `System Error: ${error.message}` };
     }
-
-    const warning = warnings.find(w => w.id == warningId);
-
-    if (!warning || warning.status === "deleted") {
-      return { success: false, error: "Warning not found or already removed" };
-    }
+  }
 
     warning.status = "deleted";
 
