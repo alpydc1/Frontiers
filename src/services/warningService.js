@@ -109,7 +109,7 @@ export class WarningService {
       return { success: false, error: "Invalid warning data" };
     }
 
-    const warning = warnings.find(w => w.id === warningId);
+    const warning = warnings.find(w => w.id == warningId);
 
     if (!warning || warning.status === "deleted") {
       return { success: false, error: "Warning not found or already removed" };
