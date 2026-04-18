@@ -129,8 +129,8 @@ async function createCategorySelectMenu() {
         .setStyle(ButtonStyle.Danger);
 
     const supportButton = new ButtonBuilder()
-        .setLabel("Support Server")
-        .setURL("http://dsc.gg/frontierscompetitive")
+        .setLabel("Want help?")
+        .setURL("https://discord.com/channels/1481587512534106134/1486750183629783262")
         .setStyle(ButtonStyle.Link);
 
     const FrontiersButton = new ButtonBuilder()
