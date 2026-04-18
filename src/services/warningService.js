@@ -101,25 +101,35 @@ export class WarningService {
 
 
   static async removeWarning(guildId, userId, warningId) {
-    try {
-      const key = `moderation:warnings:${guildId}:${userId}`;
-      const warnings = await getFromDb(key, []);
-      
-      const index = warnings.findIndex(w => w.id === warningId);
-      if (index === -1) {
-        return { success: false, error: 'Warning not found' };
-      }
+  try {
+    const key = `moderation:warnings:${guildId}:${userId}`;
+    const warnings = await getFromDb(key, []);
 
-      warnings[index].status = 'deleted';
-      await setInDb(key, warnings);
-
-      logger.info(`Warning removed: ${warningId} for ${userId} in ${guildId}`);
-      return { success: true };
-    } catch (error) {
-      logger.error('Error removing warning:', error);
-      return { success: false, error: error.message };
+    if (!Array.isArray(warnings)) {
+      return { success: false, error: "Invalid warning data" };
     }
+
+    const warning = warnings.find(w => w.id === warningId);
+
+    if (!warning || warning.status === "deleted") {
+      return { success: false, error: "Warning not found or already removed" };
+    }
+
+    warning.status = "deleted";
+
+    await setInDb(key, warnings);
+
+    logger.info(`Warning removed: ${warningId} for ${userId} in ${guildId}`);
+
+    return { 
+      success: true,
+      removedId: warningId
+    };
+  } catch (error) {
+    logger.error("Error removing warning:", error);
+    return { success: false, error: error.message };
   }
+}
 
   
 
