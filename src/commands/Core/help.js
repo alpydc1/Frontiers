@@ -185,7 +185,7 @@ async function createInitialHelpMenu() {
     const buttonRow = new ActionRowBuilder().addComponents([
         bugReportButton,
         supportButton,
-        FrontiersButton,
+        touchpointButton,
     ]);
 
     return {
