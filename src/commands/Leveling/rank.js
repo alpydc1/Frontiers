@@ -1,14 +1,56 @@
-
-
-
-
-
 import { SlashCommandBuilder, EmbedBuilder, MessageFlags } from 'discord.js';
 import { logger } from '../../utils/logger.js';
 import { handleInteractionError, TitanBotError, ErrorTypes } from '../../utils/errorHandler.js';
-import { getUserLevelData, getLevelingConfig, getXpForLevel } from '../../services/leveling.js';
-
+import { getUserLevelData, getLevelingConfig, getXpForLevel, getLeaderboard } from '../../services/leveling.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
+
+// Color tier based on level
+function getLevelColor(level) {
+  if (level >= 100) return '#F4D03F'; // Gold
+  if (level >= 75)  return '#A569BD'; // Purple
+  if (level >= 50)  return '#5DADE2'; // Blue
+  if (level >= 25)  return '#48C9B0'; // Teal
+  if (level >= 10)  return '#58D68D'; // Green
+  return '#BDC3C7';                   // Silver (beginner)
+}
+
+// Level badge based on tier
+function getLevelBadge(level) {
+  if (level >= 100) return '👑';
+  if (level >= 75)  return '💎';
+  if (level >= 50)  return '🔥';
+  if (level >= 25)  return '⚡';
+  if (level >= 10)  return '🌟';
+  return '🌱';
+}
+
+// Tier label
+function getTierLabel(level) {
+  if (level >= 100) return 'Legendary';
+  if (level >= 75)  return 'Diamond';
+  if (level >= 50)  return 'Platinum';
+  if (level >= 25)  return 'Gold';
+  if (level >= 10)  return 'Silver';
+  return 'Bronze';
+}
+
+// Smooth progress bar with percentage
+function createProgressBar(current, max, length = 14) {
+  const pct = max > 0 ? Math.min(current / max, 1) : 0;
+  const filled = Math.round(pct * length);
+  const empty = length - filled;
+  const bar = '█'.repeat(filled) + '░'.repeat(empty);
+  const percent = Math.floor(pct * 100);
+  return `\`${bar}\` **${percent}%**`;
+}
+
+// Format large numbers nicely
+function formatNum(n) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toString();
+}
+
 export default {
   data: new SlashCommandBuilder()
     .setName('rank')
@@ -17,16 +59,10 @@ export default {
       option
         .setName('user')
         .setDescription('The user to check the rank of')
-        .setRequired(false)
+        .setRequired(false),
     )
     .setDMPermission(false),
   category: 'Leveling',
-
-  
-
-
-
-
 
   async execute(interaction, config, client) {
     try {
@@ -37,64 +73,86 @@ export default {
         await InteractionHelper.safeEditReply(interaction, {
           embeds: [
             new EmbedBuilder()
-              .setColor('#f1c40f')
-              .setDescription('The leveling system is currently disabled on this server.')
+              .setColor('#BDC3C7')
+              .setDescription('⚙️ The leveling system is currently disabled on this server.'),
           ],
-          flags: MessageFlags.Ephemeral
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
 
       const targetUser = interaction.options.getUser('user') || interaction.user;
-      const member = await interaction.guild.members
-        .fetch(targetUser.id)
-        .catch(() => null);
+      const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
 
       if (!member) {
         throw new TitanBotError(
           `User ${targetUser.id} not found in guild`,
           ErrorTypes.USER_INPUT,
-          'Could not find the specified user in this server.'
+          'Could not find that user in this server.',
         );
       }
 
       const userData = await getUserLevelData(client, interaction.guildId, targetUser.id);
-
-      const safeUserData = {
+      const safeData = {
         level: userData?.level ?? 0,
         xp: userData?.xp ?? 0,
-        totalXp: userData?.totalXp ?? 0
+        totalXp: userData?.totalXp ?? 0,
       };
 
-      const xpNeeded = getXpForLevel(safeUserData.level + 1);
-      const progress = xpNeeded > 0 ? Math.floor((safeUserData.xp / xpNeeded) * 100) : 0;
-      const progressBar = createProgressBar(progress, 20);
+      const xpNeeded = getXpForLevel(safeData.level + 1);
+      const progressBar = createProgressBar(safeData.xp, xpNeeded);
+      const color = getLevelColor(safeData.level);
+      const badge = getLevelBadge(safeData.level);
+      const tier = getTierLabel(safeData.level);
+
+      // Fetch server rank
+      let rankText = '—';
+      try {
+        const leaderboard = await getLeaderboard(client, interaction.guildId, 100);
+        const pos = leaderboard.findIndex((u) => u.userId === targetUser.id);
+        if (pos !== -1) rankText = `#${pos + 1} of ${leaderboard.length}`;
+      } catch {
+        // rank fetch is best-effort
+      }
+
+      const isSelf = targetUser.id === interaction.user.id;
+      const title = isSelf
+        ? `${badge} Your Rank Card`
+        : `${badge} ${member.displayName}'s Rank Card`;
 
       const embed = new EmbedBuilder()
-        .setTitle(`${member.displayName}'s Rank`)
-        .setThumbnail(member.displayAvatarURL({ dynamic: true }))
+        .setColor(color)
+        .setTitle(title)
+        .setThumbnail(member.displayAvatarURL({ dynamic: true, size: 256 }))
+        .setDescription(
+          `> **Tier:** ${tier}\n` +
+          `> **Server Rank:** ${rankText}`,
+        )
         .addFields(
           {
-            name: '📊 Level',
-            value: safeUserData.level.toString(),
-            inline: true
+            name: '🎚️ Level',
+            value: `**${safeData.level}**`,
+            inline: true,
           },
           {
-            name: '⭐ XP',
-            value: `${safeUserData.xp}/${xpNeeded}`,
-            inline: true
+            name: '⭐ Current XP',
+            value: `**${formatNum(safeData.xp)}** / ${formatNum(xpNeeded)}`,
+            inline: true,
           },
           {
             name: '✨ Total XP',
-            value: safeUserData.totalXp.toString(),
-            inline: true
+            value: `**${formatNum(safeData.totalXp)}**`,
+            inline: true,
           },
           {
-            name: `Progress to Level ${safeUserData.level + 1}`,
-            value: `${progressBar} ${progress}%`
-          }
+            name: `Progress to Level ${safeData.level + 1}`,
+            value: progressBar,
+          },
         )
-        .setColor('#2ecc71')
+        .setFooter({
+          text: `${interaction.guild.name}`,
+          iconURL: interaction.guild.iconURL({ dynamic: true }) ?? undefined,
+        })
         .setTimestamp();
 
       await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
@@ -103,25 +161,8 @@ export default {
       logger.error('Rank command error:', error);
       await handleInteractionError(interaction, error, {
         type: 'command',
-        commandName: 'rank'
+        commandName: 'rank',
       });
     }
-  }
+  },
 };
-
-
-
-
-
-
-
-function createProgressBar(percentage, length = 10) {
-  if (percentage < 0 || percentage > 100) {
-    percentage = Math.max(0, Math.min(100, percentage));
-  }
-  const filled = Math.round((percentage / 100) * length);
-  return '█'.repeat(filled) + '░'.repeat(length - filled);
-}
-
-
-
