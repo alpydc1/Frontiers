@@ -1,96 +1,73 @@
-import { getColor } from '../../config/bot.js';
-import { SlashCommandBuilder, PermissionFlagsBits, PermissionsBitField, ChannelType } from 'discord.js';
-import { createEmbed, errorEmbed, successEmbed, infoEmbed, warningEmbed } from '../../utils/embeds.js';
-import { logEvent } from '../../utils/moderation.js';
-import { logger } from '../../utils/logger.js';
-import { WarningService } from '../../services/warningService.js';
-import { handleInteractionError } from '../../utils/errorHandler.js';
-import { InteractionHelper } from '../../utils/interactionHelper.js';
+import {
+  SlashCommandBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle
+} from "discord.js";
+
+import { WarningService } from "../../services/warningService.js";
+import { createEmbed } from "../../utils/embeds.js";
+
 export default {
-    data: new SlashCommandBuilder()
-        .setName("warnings")
-        .setDescription("View all warnings for a user")
-        .addUserOption((o) =>
-            o
-                .setName("target")
-                .setRequired(true)
-                .setDescription("User to check warnings for"),
-        )
-        .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
-    category: "moderation",
+  data: new SlashCommandBuilder()
+    .setName("warnings")
+    .setDescription("View and manage user warnings")
+    .addUserOption(option =>
+      option.setName("user")
+        .setDescription("User to check")
+        .setRequired(true)
+    ),
 
-    async execute(interaction, config, client) {
-        const deferSuccess = await InteractionHelper.safeDefer(interaction);
-        if (!deferSuccess) {
-            logger.warn(`Warnings interaction defer failed`, {
-                userId: interaction.user.id,
-                guildId: interaction.guildId,
-                commandName: 'warnings'
-            });
-            return;
-        }
+  async execute(interaction) {
+    const user = interaction.options.getUser("user");
 
-        try {
-            const target = interaction.options.getUser("target");
-            const guildId = interaction.guildId;
+    const warnings = await WarningService.getWarnings(
+      interaction.guild.id,
+      user.id
+    );
 
-            
-            const validWarnings = await WarningService.getWarnings(guildId, target.id);
-            const totalWarns = validWarnings.length;
-
-            if (totalWarns === 0) {
-                await InteractionHelper.safeEditReply(interaction, {
-                    embeds: [
-                        createEmbed({ 
-                            title: `Warnings: ${target.tag}`, 
-                            description: "✅ This user has no recorded warnings." 
-                        }).setColor(getColor('success')),
-                    ],
-                });
-                return;
-            }
-
-            const embed = createEmbed({ 
-                title: `Warnings: ${target.tag}`, 
-                description: `Total Warnings: **${totalWarns}**` 
-            }).setColor(getColor('warning'));
-
-            const warningFields = validWarnings
-                .map((w, i) => {
-                    const discordTimestamp = Math.floor(w.timestamp / 1000);
-                    return {
-                        name: `[#${i + 1}] Reason: ${w.reason.substring(0, 100)}`,
-                        value: `**Moderator:** <@${w.moderatorId}>\n**Date:** <t:${discordTimestamp}:F> (<t:${discordTimestamp}:R>)`,
-                        inline: false,
-                    };
-                })
-                .slice(0, 25);
-
-            embed.addFields(warningFields);
-
-            await logEvent({
-                client,
-                guild: interaction.guild,
-                event: {
-                    action: "Warnings Viewed",
-                    target: `${target.tag} (${target.id})`,
-                    executor: `${interaction.user.tag} (${interaction.user.id})`,
-                    reason: `Viewed ${totalWarns} warnings`,
-                    metadata: {
-                        userId: target.id,
-                        moderatorId: interaction.user.id,
-                        totalWarnings: totalWarns
-                    }
-                }
-            });
-
-            await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
-        } catch (error) {
-            logger.error('Warnings command error:', error);
-            await handleInteractionError(interaction, error, { subtype: 'warnings_view_failed' });
-        }
+    if (!warnings.length) {
+      return interaction.reply({
+        embeds: [
+          createEmbed({
+            title: "📜 No Warnings",
+            description: `${user} has a clean record.`,
+            color: "success"
+          })
+        ]
+      });
     }
+
+    const embed = createEmbed({
+      title: `⚠️ Warnings for ${user.username}`,
+      description: "Click a button below to remove a warning.",
+      color: "primary"
+    });
+
+    const rows = [];
+
+    warnings.slice(0, 5).forEach((w, index) => {
+      embed.addFields({
+        name: `Warning ${index + 1}`,
+        value:
+          `**Reason:** ${w.reason}\n` +
+          `**Moderator:** <@${w.moderatorId}>`,
+        inline: false
+      });
+
+      rows.push(
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`remove_warn_${user.id}_${w.id}`)
+            .setLabel(`Remove #${index + 1}`)
+            .setStyle(ButtonStyle.Danger)
+        )
+      );
+    });
+
+    return interaction.reply({
+      embeds: [embed],
+      components: rows
+    });
+  }
 };
-
-
-
