@@ -1,16 +1,10 @@
 import { getFromDb, setInDb } from '../utils/database.js';
 import { logger } from '../utils/logger.js';
 
-
-
-
-
 export class WarningService {
-  
-
-
-
-
+  /**
+   * Add a warning to a user in a guild.
+   */
   static async addWarning({
     guildId,
     userId,
@@ -20,18 +14,14 @@ export class WarningService {
   }) {
     try {
       const key = `moderation:warnings:${guildId}:${userId}`;
-      
-      
       const warnings = await getFromDb(key, []);
-      
-      
+
       if (!Array.isArray(warnings)) {
         logger.warn(`Warnings for ${userId} in ${guildId} corrupted, resetting`);
         await setInDb(key, []);
         return { success: false, error: 'Corrupted data' };
       }
 
-      
       const warning = {
         id: Date.now(),
         guildId,
@@ -42,18 +32,15 @@ export class WarningService {
         status: 'active'
       };
 
-      
       warnings.push(warning);
-
-      
       await setInDb(key, warnings);
 
       logger.info(`Warning added: ${userId} in ${guildId} by ${moderatorId}`);
-      
+
       return {
         success: true,
         id: warning.id,
-        totalCount: warnings.length
+        totalCount: warnings.filter(w => w.status !== 'deleted').length
       };
     } catch (error) {
       logger.error('Error adding warning:', error);
@@ -61,19 +48,15 @@ export class WarningService {
     }
   }
 
-  
-
-
-
-
-
+  /**
+   * Get all active warnings for a user in a guild.
+   */
   static async getWarnings(guildId, userId) {
     try {
       const key = `moderation:warnings:${guildId}:${userId}`;
       const warnings = await getFromDb(key, []);
-      
-      // Filter out deleted warnings and validate schema
-      return Array.isArray(warnings) 
+
+      return Array.isArray(warnings)
         ? warnings.filter(w => w && w.status !== 'deleted')
         : [];
     } catch (error) {
@@ -82,116 +65,82 @@ export class WarningService {
     }
   }
 
-  
-
-
-
-
-
+  /**
+   * Get the count of active warnings for a user in a guild.
+   */
   static async getWarningCount(guildId, userId) {
     const warnings = await this.getWarnings(guildId, userId);
     return warnings.length;
   }
 
-  
-
-
-
-
-
-
+  /**
+   * Remove a specific warning by ID from a user in a guild.
+   */
   static async removeWarning(guildId, userId, warningId) {
     try {
       const key = `moderation:warnings:${guildId}:${userId}`;
       const warnings = await getFromDb(key, []);
 
       if (!Array.isArray(warnings)) {
-        return { success: false, error: "Invalid warning data structure." };
+        return { success: false, error: 'Invalid warning data structure.' };
       }
 
-      // FIX: Using loose equality (==) to handle String vs Number IDs
+      // Use loose equality to handle String vs Number IDs
       const warning = warnings.find(w => w.id == warningId);
 
       if (!warning) {
-        return { success: false, error: "Warning not found in database." };
+        return { success: false, error: 'Warning not found in database.' };
       }
 
-      if (warning.status === "deleted") {
-        return { success: false, error: "This warning has already been removed." };
+      if (warning.status === 'deleted') {
+        return { success: false, error: 'This warning has already been removed.' };
       }
 
-      // Mark as deleted
-      warning.status = "deleted";
-
-      // Save back to DB
+      warning.status = 'deleted';
       await setInDb(key, warnings);
 
       logger.info(`Warning removed: ${warningId} for ${userId} in ${guildId}`);
 
-      return { 
-        success: true, 
-        removedId: warningId 
+      return {
+        success: true,
+        removedId: warningId
       };
     } catch (error) {
-      // This will now log the EXACT error to your console
-      logger.error("CRITICAL DATABASE ERROR:", error);
-      return { success: false, error: `System Error: ${error.message}` };
+      logger.error('Error removing warning:', error);
+      return { success: false, error: error.message };
     }
   }
 
-    warning.status = "deleted";
-
-    await setInDb(key, warnings);
-
-    logger.info(`Warning removed: ${warningId} for ${userId} in ${guildId}`);
-
-    return { 
-      success: true,
-      removedId: warningId
-    };
-  } catch (error) {
-    logger.error("Error removing warning:", error);
-    return { success: false, error: error.message };
-  }
-}
-
-  
-
-
-
-
-
+  /**
+   * Clear all warnings for a user in a guild.
+   */
   static async clearWarnings(guildId, userId) {
     try {
       const key = `moderation:warnings:${guildId}:${userId}`;
       const warnings = await getFromDb(key, []);
-      const count = warnings.length;
+
+      const activeCount = Array.isArray(warnings)
+        ? warnings.filter(w => w.status !== 'deleted').length
+        : 0;
 
       await setInDb(key, []);
 
-      logger.info(`Warnings cleared for ${userId} in ${guildId} (${count} removed)`);
-      return { success: true, count };
+      logger.info(`Warnings cleared for ${userId} in ${guildId} (${activeCount} removed)`);
+      return { success: true, count: activeCount };
     } catch (error) {
       logger.error('Error clearing warnings:', error);
       return { success: false, error: error.message };
     }
   }
 
-  
-
-
-
-
-
+  /**
+   * Get all warnings across a guild (by all users).
+   * Note: Requires database to support prefix/list queries.
+   */
   static async getGuildWarnings(guildId, filters = {}) {
     try {
-      const { moderatorId, limit = 100 } = filters;
-      const prefix = `moderation:warnings:${guildId}:`;
-      
-      // This implementation assumes database has list() method
-      
+      const { limit = 100 } = filters;
       const allWarnings = [];
-      
       logger.debug(`Fetched guild warnings for ${guildId} with ${allWarnings.length} total`);
       return allWarnings.slice(0, limit);
     } catch (error) {
