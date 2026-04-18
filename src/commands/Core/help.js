@@ -157,7 +157,7 @@ async function createInitialHelpMenu() {
     );
 
     embed.setFooter({ 
-        text: "Made with ❤️" 
+        text: "Frontiers Competitive League" 
     });
     embed.setTimestamp();
 
@@ -167,13 +167,13 @@ async function createInitialHelpMenu() {
         .setStyle(ButtonStyle.Danger);
 
     const supportButton = new ButtonBuilder()
-        .setLabel("Support Server")
-        .setURL("https://discord.gg/QnWNz2dKCE")
+        .setLabel("Need help?")
+        .setURL("https://discord.com/channels/1481587512534106134/1486750183629783262")
         .setStyle(ButtonStyle.Link);
 
     const touchpointButton = new ButtonBuilder()
-        .setLabel("Learn from Touchpoint")
-        .setURL("https://www.youtube.com/@TouchDisc")
+        .setLabel("Server Info?")
+        .setURL("https://discord.com/channels/1481587512534106134/1493875742910447636")
         .setStyle(ButtonStyle.Link);
 
     const selectRow = createSelectMenu(
@@ -185,7 +185,7 @@ async function createInitialHelpMenu() {
     const buttonRow = new ActionRowBuilder().addComponents([
         bugReportButton,
         supportButton,
-        touchpointButton,
+        FrontiersButton,
     ]);
 
     return {
