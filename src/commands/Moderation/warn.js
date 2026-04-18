@@ -1,102 +1,84 @@
-import { SlashCommandBuilder, PermissionFlagsBits, PermissionsBitField, ChannelType, MessageFlags } from 'discord.js';
-import { createEmbed, errorEmbed, successEmbed, infoEmbed, warningEmbed } from '../../utils/embeds.js';
-import { logModerationAction } from '../../utils/moderation.js';
-import { logger } from '../../utils/logger.js';
+import {
+  SlashCommandBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  PermissionFlagsBits,
+  MessageFlags,
+} from 'discord.js';
 import { WarningService } from '../../services/warningService.js';
+import { createEmbed } from '../../utils/embeds.js';
+import { logger } from '../../utils/logger.js';
 import { handleInteractionError } from '../../utils/errorHandler.js';
-import { InteractionHelper } from '../../utils/interactionHelper.js';
+
 export default {
-    data: new SlashCommandBuilder()
-        .setName("warn")
-        .setDescription("Warn a user")
-        .addUserOption((o) =>
-            o
-                .setName("target")
-                .setRequired(true)
-                .setDescription("User to warn"),
-        )
-        .addStringOption((o) =>
-            o
-                .setName("reason")
-                .setRequired(true)
-                .setDescription("Reason for the warning"),
-        )
-        .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
-    category: "moderation",
+  data: new SlashCommandBuilder()
+    .setName('warnings')
+    .setDescription('View and manage warnings for a user')
+    .addUserOption((option) =>
+      option.setName('user').setDescription('User to check').setRequired(true),
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+  category: 'moderation',
 
-    async execute(interaction, config, client) {
-        const deferSuccess = await InteractionHelper.safeDefer(interaction);
-        if (!deferSuccess) {
-            logger.warn(`Warn interaction defer failed`, {
-                userId: interaction.user.id,
-                guildId: interaction.guildId,
-                commandName: 'warn'
-            });
-            return;
-        }
+  async execute(interaction) {
+    try {
+      const user = interaction.options.getUser('user');
+      const warnings = await WarningService.getWarnings(interaction.guild.id, user.id);
 
-        try {
-                if (!interaction.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
-                    throw new Error("You need the `Moderate Members` permission to issue warnings.");
-                }
+      if (!warnings.length) {
+        return interaction.reply({
+          embeds: [
+            createEmbed({
+              title: '📜 No Warnings',
+              description: `${user} has a clean record.`,
+              color: 'success',
+            }),
+          ],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
 
-                const target = interaction.options.getUser("target");
-                const member = interaction.options.getMember("target");
-                const reason = interaction.options.getString("reason");
-                const moderator = interaction.user;
-                const guildId = interaction.guildId;
+      const embed = createEmbed({
+        title: `⚠️ Warnings for ${user.username}`,
+        description: `**${user}** has **${warnings.length}** active warning(s). Click a button below to remove one.`,
+        color: 'warning',
+        footer: warnings.length > 5 ? `Showing 5 of ${warnings.length} warnings` : null,
+      });
 
-                if (!member) {
-                    throw new Error("The target user is not currently in this server.");
-                }
+      const rows = [];
 
-                
-                const result = await WarningService.addWarning({
-                    guildId,
-                    userId: target.id,
-                    moderatorId: moderator.id,
-                    reason,
-                    timestamp: Date.now()
-                });
+      warnings.slice(0, 5).forEach((w, index) => {
+        const date = new Date(w.timestamp || w.createdAt || Date.now());
+        const timestamp = Math.floor(date.getTime() / 1000);
 
-                if (!result.success) {
-                    throw new Error("Failed to store warning in database");
-                }
+        embed.addFields({
+          name: `Warning ${index + 1} — ID: \`${w.id}\``,
+          value:
+            `**Reason:** ${w.reason}\n` +
+            `**Moderator:** <@${w.moderatorId}>\n` +
+            `**Date:** <t:${timestamp}:R>`,
+          inline: false,
+        });
 
-                const totalWarns = result.totalCount;
+        rows.push(
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`remove_warn:${user.id}:${w.id}`)
+              .setLabel(`Remove Warning ${index + 1}`)
+              .setStyle(ButtonStyle.Danger),
+          ),
+        );
+      });
 
-                await logModerationAction({
-                    client,
-                    guild: interaction.guild,
-                    event: {
-                        action: "User Warned",
-                        target: `${target.tag} (${target.id})`,
-                        executor: `${moderator.tag} (${moderator.id})`,
-                        reason,
-                        metadata: {
-                            userId: target.id,
-                            moderatorId: moderator.id,
-                            totalWarns,
-                            warningNumber: totalWarns,
-                            warningId: result.id
-                        }
-                    }
-                });
-
-                await InteractionHelper.safeEditReply(interaction, {
-                    embeds: [
-                        successEmbed(
-                            `⚠️ **Warned** ${target.tag}`,
-                            `**Reason:** ${reason}\n**Total Warns:** ${totalWarns}`,
-                        ),
-                    ],
-                });
-        } catch (error) {
-            logger.error('Warn command error:', error);
-            await handleInteractionError(interaction, error, { subtype: 'warn_failed' });
-        }
+      return interaction.reply({
+        embeds: [embed],
+        components: rows,
+        flags: MessageFlags.Ephemeral,
+      });
+    } catch (error) {
+      logger.error('Warnings command error:', error);
+      await handleInteractionError(interaction, error, { subtype: 'warnings_fetch_failed' });
     }
+  },
 };
-
-
-
