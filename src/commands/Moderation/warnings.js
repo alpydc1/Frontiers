@@ -58,7 +58,7 @@ export default {
       rows.push(
         new ActionRowBuilder().addComponents(
           new ButtonBuilder()
-            .setCustomId(`remove_warn_${user.id}_${w.id}`)
+            .setCustomId(`remove_warn:${user.id}:${w.id}`)
             .setLabel(`Remove #${index + 1}`)
             .setStyle(ButtonStyle.Danger)
         )
