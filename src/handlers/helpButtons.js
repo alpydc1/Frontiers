@@ -133,7 +133,7 @@ async function createCategorySelectMenu() {
         .setURL("http://dsc.gg/frontierscompetitive")
         .setStyle(ButtonStyle.Link);
 
-    const touchpointButton = new ButtonBuilder()
+    const FrontiersButton = new ButtonBuilder()
         .setLabel("Learn from Alpy")
         .setURL("http://dsc.gg/frontierscompetitive")
         .setStyle(ButtonStyle.Link);
