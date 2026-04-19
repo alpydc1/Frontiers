@@ -44,15 +44,7 @@ export default {
                         .setDescription(
                             "The label for the ticket creation button (default: Create Ticket)",
                         )
-                        .setRequired(false)
-                .addStringOption((option) =>
-                    option
-                        .setName("panel_image")
-                        .setDescription(
-                            "A Discord image URL to display in the ticket panel embed.",
-                        )
                         .setRequired(false),
-                ),
                 )
                 .addChannelOption((option) =>
                     option
@@ -158,7 +150,6 @@ const panelMessage = interaction.options.getString("panel_message") || "Click th
             const buttonLabel =
                 interaction.options.getString("button_label") ||
 "Create Ticket";
-            const panelImage = interaction.options.getString("panel_image") || null;
             const maxTicketsPerUser = interaction.options.getInteger("max_tickets_per_user") || 3;
 const dmOnClose = interaction.options.getBoolean("dm_on_close") !== false;
 
@@ -167,9 +158,6 @@ const dmOnClose = interaction.options.getBoolean("dm_on_close") !== false;
 description: panelMessage,
                 color: getColor('info')
             });
-            if (panelImage && panelImage.startsWith('https://')) {
-                setupEmbed.setImage(panelImage);
-            }
 
             const ticketButton = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
@@ -193,7 +181,6 @@ description: panelMessage,
                     currentConfig.ticketPanelChannelId = panelChannel.id;
                     currentConfig.ticketPanelMessage = panelMessage;
                     currentConfig.ticketButtonLabel = buttonLabel;
-                    currentConfig.ticketPanelImageUrl = panelImage || null;
                     currentConfig.maxTicketsPerUser = maxTicketsPerUser;
                     currentConfig.dmOnClose = dmOnClose;
 
