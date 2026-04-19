@@ -5,7 +5,7 @@ export const botConfig = {
   // =========================
   // BOT PREFIX
   // =========================
-  prefix: "/", "!"
+  prefix: "/",
 
   // =========================
   // BOT PRESENCE (what users see under the bot name)
