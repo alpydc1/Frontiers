@@ -46,8 +46,6 @@ function getPriorityMap() {
 const PRIORITY_MAP = getPriorityMap();
 const TICKET_DELETE_DELAY_MS = 3000;
 const TICKET_DELETE_DELAY_SECONDS = Math.floor(TICKET_DELETE_DELAY_MS / 1000);
-const TICKET_NUMBER_BASE = 100;
-const TICKET_NUMBER_RANGE = 900;
 
 
 
@@ -108,7 +106,7 @@ export async function createTicket(guild, member, categoryId, reason = 'No reaso
       });
     }
     
-    const ticketNumber = await getNextTicketNumber(guild.id);
+    const ticketNumber = await getNextTicketNumber(guild.id, guild.client);
     
     // Parse ticket type from reason prefix [Type: label]
     const typeMatch = reason.match(/^\[([^\]]+)\]/);
@@ -1155,9 +1153,12 @@ export async function unclaimTicket(channel, unclaimer) {
   }
 }
 
-async function getNextTicketNumber(guildId) {
-  const randomTicket = Math.floor(Math.random() * TICKET_NUMBER_RANGE) + TICKET_NUMBER_BASE;
-  return randomTicket.toString();
+async function getNextTicketNumber(guildId, client) {
+  const key = `${guildId}:tickets:counter`;
+  const current = (await client.db.get(key)) || 0;
+  const next = current + 1;
+  await client.db.set(key, next);
+  return next.toString();
 }
 
 export async function updateTicketPriority(channel, priority, updater) {
