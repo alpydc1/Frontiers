@@ -163,6 +163,11 @@ function buildMainMenu(state) {
                 .setValue('set_images')
                 .setEmoji('🖼️'),
             new StringSelectMenuOptionBuilder()
+                .setLabel('Insert Server Emoji')
+                .setDescription('Pick a custom server emoji and add it to your embed')
+                .setValue('insert_emoji')
+                .setEmoji('😀'),
+            new StringSelectMenuOptionBuilder()
                 .setLabel(`Add Field  (${state.fields.length}/${MAX_FIELDS})`)
                 .setDescription('Add a new inline or block field')
                 .setValue('add_field')
@@ -935,6 +940,126 @@ async function handleReorderFields(selectInteraction, rootInteraction, state) {
     });
 }
 
+async function handleInsertEmoji(selectInteraction, rootInteraction, state, guild) {
+    const emojis = [...guild.emojis.cache.values()].slice(0, 25);
+
+    const deferred = await safeDeferUpdate(selectInteraction);
+    if (!deferred) return;
+
+    if (emojis.length === 0) {
+        await selectInteraction.followUp({
+            embeds: [errorEmbed('No Custom Emojis', 'This server has no custom emojis to pick from.')],
+            flags: MessageFlags.Ephemeral,
+        });
+        return;
+    }
+
+    const emojiSelect = new StringSelectMenuBuilder()
+        .setCustomId('eb_emoji_pick')
+        .setPlaceholder('Pick a server emoji...')
+        .addOptions(
+            emojis.map(e =>
+                new StringSelectMenuOptionBuilder()
+                    .setLabel(e.name.substring(0, 100))
+                    .setValue(e.animated ? `<a:${e.name}:${e.id}>` : `<:${e.name}:${e.id}>`)
+                    .setEmoji({ id: e.id, name: e.name, animated: e.animated ?? false }),
+            ),
+        );
+
+    await selectInteraction.followUp({
+        embeds: [
+            new EmbedBuilder()
+                .setTitle('😀 Insert Server Emoji')
+                .setDescription(
+                    `Pick an emoji from this server's custom emojis.\n*(Showing up to 25 — ${guild.emojis.cache.size} total)*`,
+                )
+                .setColor(getColor('info')),
+        ],
+        components: [new ActionRowBuilder().addComponents(emojiSelect)],
+        flags: MessageFlags.Ephemeral,
+    });
+
+    const emojiCollector = rootInteraction.channel.createMessageComponentCollector({
+        componentType: ComponentType.StringSelect,
+        filter: i =>
+            i.user.id === selectInteraction.user.id && i.customId === 'eb_emoji_pick',
+        time: 60_000,
+        max: 1,
+    });
+
+    emojiCollector.on('collect', async emojiInter => {
+        const emojiStr = emojiInter.values[0];
+
+        const targetOptions = [
+            new StringSelectMenuOptionBuilder()
+                .setLabel('Prepend to Title')
+                .setDescription(state.title ? `Current: "${state.title.substring(0, 40)}"` : 'Title is empty')
+                .setValue('title')
+                .setEmoji('✏️'),
+            new StringSelectMenuOptionBuilder()
+                .setLabel('Prepend to Description')
+                .setDescription(state.description ? `${state.description.length} chars` : 'Description is empty')
+                .setValue('description')
+                .setEmoji('📝'),
+        ];
+
+        if (state.fields.length > 0) {
+            targetOptions.push(
+                ...state.fields.slice(0, 23).map((f, i) =>
+                    new StringSelectMenuOptionBuilder()
+                        .setLabel(`Prepend to Field ${i + 1}: ${f.name.substring(0, 40)}`)
+                        .setDescription(f.value.substring(0, 80))
+                        .setValue(`field_${i}`)
+                        .setEmoji('📋'),
+                ),
+            );
+        }
+
+        const targetSelect = new StringSelectMenuBuilder()
+            .setCustomId('eb_emoji_target')
+            .setPlaceholder('Where do you want to insert it?')
+            .addOptions(targetOptions);
+
+        await emojiInter.update({
+            embeds: [
+                new EmbedBuilder()
+                    .setTitle('😀 Insert Emoji')
+                    .setDescription(`Selected: ${emojiStr}\n\nWhere would you like to insert this emoji?`)
+                    .setColor(getColor('info')),
+            ],
+            components: [new ActionRowBuilder().addComponents(targetSelect)],
+        });
+
+        const targetCollector = rootInteraction.channel.createMessageComponentCollector({
+            componentType: ComponentType.StringSelect,
+            filter: i =>
+                i.user.id === selectInteraction.user.id && i.customId === 'eb_emoji_target',
+            time: 60_000,
+            max: 1,
+        });
+
+        targetCollector.on('collect', async targetInter => {
+            const ok = await safeDeferUpdate(targetInter);
+            if (!ok) return;
+
+            const target = targetInter.values[0];
+
+            if (target === 'title') {
+                state.title = `${emojiStr} ${state.title || ''}`.trim().substring(0, 256);
+            } else if (target === 'description') {
+                state.description = `${emojiStr} ${state.description || ''}`.trim().substring(0, 4096);
+            } else if (target.startsWith('field_')) {
+                const idx = parseInt(target.replace('field_', ''), 10);
+                if (state.fields[idx]) {
+                    state.fields[idx].name = `${emojiStr} ${state.fields[idx].name}`.trim().substring(0, 256);
+                }
+            }
+
+            await refreshDashboard(rootInteraction, state);
+        });
+    });
+}
+
 async function handlePostEmbed(selectInteraction, rootInteraction, state, guild) {
     if (
         !state.title &&
@@ -1120,6 +1245,9 @@ export default {
                             break;
                         case 'set_images':
                             await handleSetImages(ci, interaction, state);
+                            break;
+                        case 'insert_emoji':
+                            await handleInsertEmoji(ci, interaction, state, guild);
                             break;
                         case 'add_field':
                             await handleAddField(ci, interaction, state);
