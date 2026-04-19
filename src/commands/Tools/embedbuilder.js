@@ -24,7 +24,7 @@ import { getColor } from '../../config/bot.js';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const MAX_FIELDS = 25;
-const IDLE_TIMEOUT = 900_000; // 15 minutes
+const IDLE_TIMEOUT = 600_000; // 10 minutes (well within Discord's 15-min token expiry)
 
 const COLOR_PRESETS = [
     { label: 'Primary (Blue)',        value: '#336699', emoji: '🔵' },
@@ -55,11 +55,17 @@ function isValidHex(str) {
     return /^#[0-9A-Fa-f]{6}$/.test(str);
 }
 
+async function safeDeferUpdate(interaction) {
+    try {
+        await interaction.deferUpdate();
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 // ─── Embed Builders ────────────────────────────────────────────────────────────
 
-/**
- * Builds the live preview embed from current state.
- */
 function buildPreviewEmbed(state) {
     const embed = new EmbedBuilder();
 
@@ -91,7 +97,6 @@ function buildPreviewEmbed(state) {
 
     if (state.fields.length > 0) embed.addFields(state.fields.slice(0, 25));
 
-    // Ensure the embed renders if completely empty
     if (
         !state.title &&
         !state.description &&
@@ -104,9 +109,6 @@ function buildPreviewEmbed(state) {
     return embed;
 }
 
-/**
- * Builds the status/control dashboard embed (shown below the preview).
- */
 function buildDashboardEmbed(state) {
     const trunc = (str, n) =>
         str.length > n ? str.substring(0, n) + '…' : str;
@@ -127,12 +129,9 @@ function buildDashboardEmbed(state) {
         .setTitle('🛠️ Embed Builder — Control Panel')
         .setDescription(lines.join('\n'))
         .setColor(getColor('info'))
-        .setFooter({ text: 'The preview above updates live · Closes after 5 min of inactivity' });
+        .setFooter({ text: 'The preview above updates live · Closes after 10 min of inactivity' });
 }
 
-/**
- * Builds the main action select menu.
- */
 function buildMainMenu(state) {
     const select = new StringSelectMenuBuilder()
         .setCustomId('eb_menu')
@@ -221,9 +220,6 @@ function buildMainMenu(state) {
     return select;
 }
 
-/**
- * Updates the dashboard message with the latest state.
- */
 async function refreshDashboard(interaction, state) {
     return await InteractionHelper.safeEditReply(interaction, {
         embeds: [buildPreviewEmbed(state), buildDashboardEmbed(state)],
@@ -271,7 +267,6 @@ async function handleEditContent(selectInteraction, rootInteraction, state) {
 
     if (!submitted) return;
 
-    // Defer immediately to avoid interaction timeout
     await submitted.deferUpdate().catch(() => {});
 
     state.title       = submitted.fields.getTextInputValue('eb_title').trim()       || null;
@@ -281,7 +276,8 @@ async function handleEditContent(selectInteraction, rootInteraction, state) {
 }
 
 async function handleSetColor(selectInteraction, rootInteraction, state) {
-    await selectInteraction.deferUpdate().catch(() => {});
+    const deferred = await safeDeferUpdate(selectInteraction);
+    if (!deferred) return;
 
     const colorSelect = new StringSelectMenuBuilder()
         .setCustomId('eb_color_pick')
@@ -367,7 +363,8 @@ async function handleSetColor(selectInteraction, rootInteraction, state) {
             await hexSubmit.deferUpdate().catch(() => {});
         } else {
             state.color = picked;
-            await colorInter.deferUpdate().catch(() => {});
+            const colorDeferred = await safeDeferUpdate(colorInter);
+            if (!colorDeferred) return;
         }
 
         await refreshDashboard(rootInteraction, state);
@@ -500,7 +497,8 @@ async function handleSetFooter(selectInteraction, rootInteraction, state) {
 }
 
 async function handleSetImages(selectInteraction, rootInteraction, state) {
-    await selectInteraction.deferUpdate().catch(() => {});
+    const deferred = await safeDeferUpdate(selectInteraction);
+    if (!deferred) return;
 
     const imageSelect = new StringSelectMenuBuilder()
         .setCustomId('eb_image_pick')
@@ -556,13 +554,15 @@ async function handleSetImages(selectInteraction, rootInteraction, state) {
 
         if (pick === 'clear_thumbnail') {
             state.thumbnail = null;
-            await imgInter.deferUpdate();
+            const ok = await safeDeferUpdate(imgInter);
+            if (!ok) return;
             await refreshDashboard(rootInteraction, state);
             return;
         }
         if (pick === 'clear_image') {
             state.image = null;
-            await imgInter.deferUpdate();
+            const ok = await safeDeferUpdate(imgInter);
+            if (!ok) return;
             await refreshDashboard(rootInteraction, state);
             return;
         }
@@ -617,7 +617,8 @@ async function handleSetImages(selectInteraction, rootInteraction, state) {
 
 async function handleAddField(selectInteraction, rootInteraction, state) {
     if (state.fields.length >= MAX_FIELDS) {
-        await selectInteraction.deferUpdate();
+        const deferred = await safeDeferUpdate(selectInteraction);
+        if (!deferred) return;
         await selectInteraction.followUp({
             embeds: [errorEmbed('Fields Full', `Embeds can have a maximum of ${MAX_FIELDS} fields.`)],
             flags: MessageFlags.Ephemeral,
@@ -670,10 +671,10 @@ async function handleAddField(selectInteraction, rootInteraction, state) {
 
     if (!submitted) return;
 
-    const name     = submitted.fields.getTextInputValue('field_name').trim();
-    const value    = submitted.fields.getTextInputValue('field_value').trim();
+    const name      = submitted.fields.getTextInputValue('field_name').trim();
+    const value     = submitted.fields.getTextInputValue('field_value').trim();
     const inlineRaw = submitted.fields.getTextInputValue('field_inline').trim().toLowerCase();
-    const inline   = inlineRaw === 'yes' || inlineRaw === 'y' || inlineRaw === 'true';
+    const inline    = inlineRaw === 'yes' || inlineRaw === 'y' || inlineRaw === 'true';
 
     state.fields.push({ name, value, inline });
 
@@ -682,7 +683,8 @@ async function handleAddField(selectInteraction, rootInteraction, state) {
 }
 
 async function handleEditField(selectInteraction, rootInteraction, state) {
-    await selectInteraction.deferUpdate();
+    const deferred = await safeDeferUpdate(selectInteraction);
+    if (!deferred) return;
 
     const pickSelect = new StringSelectMenuBuilder()
         .setCustomId('eb_edit_field_pick')
@@ -721,7 +723,10 @@ async function handleEditField(selectInteraction, rootInteraction, state) {
     pickCollector.on('collect', async pickInter => {
         const idx   = parseInt(pickInter.values[0], 10);
         const field = state.fields[idx];
-        if (!field) { await pickInter.deferUpdate(); return; }
+        if (!field) {
+            await safeDeferUpdate(pickInter);
+            return;
+        }
 
         const modal = new ModalBuilder()
             .setCustomId('eb_edit_field_modal')
@@ -781,7 +786,8 @@ async function handleEditField(selectInteraction, rootInteraction, state) {
 }
 
 async function handleRemoveField(selectInteraction, rootInteraction, state) {
-    await selectInteraction.deferUpdate();
+    const deferred = await safeDeferUpdate(selectInteraction);
+    if (!deferred) return;
 
     const pickSelect = new StringSelectMenuBuilder()
         .setCustomId('eb_remove_field_pick')
@@ -818,7 +824,8 @@ async function handleRemoveField(selectInteraction, rootInteraction, state) {
     });
 
     removeCollector.on('collect', async removeInter => {
-        await removeInter.deferUpdate();
+        const ok = await safeDeferUpdate(removeInter);
+        if (!ok) return;
         const idx = parseInt(removeInter.values[0], 10);
         state.fields.splice(idx, 1);
         await refreshDashboard(rootInteraction, state);
@@ -826,7 +833,8 @@ async function handleRemoveField(selectInteraction, rootInteraction, state) {
 }
 
 async function handleReorderFields(selectInteraction, rootInteraction, state) {
-    await selectInteraction.deferUpdate();
+    const deferred = await safeDeferUpdate(selectInteraction);
+    if (!deferred) return;
 
     const pickSelect = new StringSelectMenuBuilder()
         .setCustomId('eb_reorder_pick')
@@ -863,7 +871,8 @@ async function handleReorderFields(selectInteraction, rootInteraction, state) {
     });
 
     pickCollector.on('collect', async pickInter => {
-        await pickInter.deferUpdate();
+        const ok = await safeDeferUpdate(pickInter);
+        if (!ok) return;
         const sourceIdx = parseInt(pickInter.values[0], 10);
 
         const upBtn = new ButtonBuilder()
@@ -908,7 +917,8 @@ async function handleReorderFields(selectInteraction, rootInteraction, state) {
         });
 
         dirCollector.on('collect', async dirInter => {
-            await dirInter.deferUpdate();
+            const dirOk = await safeDeferUpdate(dirInter);
+            if (!dirOk) return;
             if (dirInter.customId === 'eb_reorder_cancel') return;
 
             const targetIdx =
@@ -916,7 +926,7 @@ async function handleReorderFields(selectInteraction, rootInteraction, state) {
 
             if (targetIdx < 0 || targetIdx >= state.fields.length) return;
 
-            const temp             = state.fields[sourceIdx];
+            const temp              = state.fields[sourceIdx];
             state.fields[sourceIdx] = state.fields[targetIdx];
             state.fields[targetIdx] = temp;
 
@@ -932,7 +942,8 @@ async function handlePostEmbed(selectInteraction, rootInteraction, state, guild)
         state.fields.length === 0 &&
         !state.author?.name
     ) {
-        await selectInteraction.deferUpdate();
+        const deferred = await safeDeferUpdate(selectInteraction);
+        if (!deferred) return;
         await selectInteraction.followUp({
             embeds: [
                 errorEmbed(
@@ -945,7 +956,8 @@ async function handlePostEmbed(selectInteraction, rootInteraction, state, guild)
         return;
     }
 
-    await selectInteraction.deferUpdate();
+    const deferred = await safeDeferUpdate(selectInteraction);
+    if (!deferred) return;
 
     const chanSelect = new ChannelSelectMenuBuilder()
         .setCustomId('eb_post_channel')
@@ -972,7 +984,9 @@ async function handlePostEmbed(selectInteraction, rootInteraction, state, guild)
     });
 
     chanCollector.on('collect', async chanInter => {
-        await chanInter.deferUpdate();
+        const chanDeferred = await safeDeferUpdate(chanInter);
+        if (!chanDeferred) return;
+
         const channel = chanInter.channels.first();
 
         if (!channel) {
@@ -999,7 +1013,6 @@ async function handlePostEmbed(selectInteraction, rootInteraction, state, guild)
 
         const finalEmbed = buildPreviewEmbed(state);
 
-        // Remove the placeholder description before sending
         if (finalEmbed.data.description === '*(Empty — use the menu below to add content)*') {
             finalEmbed.setDescription(null);
         }
@@ -1014,7 +1027,8 @@ async function handlePostEmbed(selectInteraction, rootInteraction, state, guild)
 }
 
 async function handleJsonExport(selectInteraction, rootInteraction, state) {
-    await selectInteraction.deferUpdate();
+    const deferred = await safeDeferUpdate(selectInteraction);
+    if (!deferred) return;
 
     const previewEmbed = buildPreviewEmbed(state);
     const json = JSON.stringify(previewEmbed.toJSON(), null, 2);
@@ -1065,7 +1079,6 @@ export default {
 
             const guild = interaction.guild;
 
-            // Builder state — holds every embed property being constructed
             const state = {
                 title:       null,
                 description: null,
@@ -1119,7 +1132,7 @@ export default {
                             break;
                         case 'toggle_timestamp':
                             state.timestamp = !state.timestamp;
-                            await ci.deferUpdate();
+                            await safeDeferUpdate(ci);
                             await refreshDashboard(interaction, state);
                             break;
                         case 'post_embed':
@@ -1138,11 +1151,11 @@ export default {
                             state.image       = null;
                             state.timestamp   = false;
                             state.fields      = [];
-                            await ci.deferUpdate();
+                            await safeDeferUpdate(ci);
                             await refreshDashboard(interaction, state);
                             break;
                         default:
-                            await ci.deferUpdate();
+                            await safeDeferUpdate(ci);
                     }
                 } catch (error) {
                     logger.error('Error in embedbuilder collector:', error);
@@ -1150,7 +1163,7 @@ export default {
                         error instanceof TitanBotError
                             ? error.userMessage || 'An error occurred.'
                             : 'An unexpected error occurred.';
-                    if (!ci.replied && !ci.deferred) await ci.deferUpdate().catch(() => {});
+                    if (!ci.replied && !ci.deferred) await safeDeferUpdate(ci);
                     await ci
                         .followUp({
                             embeds: [errorEmbed('Error', msg)],
