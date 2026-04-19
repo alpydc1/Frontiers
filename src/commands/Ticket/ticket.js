@@ -44,7 +44,8 @@ export default {
                         .setDescription(
                             "The label for the ticket creation button (default: Create Ticket)",
                         )
-                        .setRequired(false)
+                        .setRequired(false),
+                )
                 .addStringOption((option) =>
                     option
                         .setName("panel_image")
@@ -52,7 +53,6 @@ export default {
                             "A Discord image URL to display in the ticket panel embed.",
                         )
                         .setRequired(false),
-                ),
                 )
                 .addChannelOption((option) =>
                     option
