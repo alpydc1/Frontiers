@@ -5,7 +5,7 @@ export const botConfig = {
   // =========================
   // BOT PREFIX
   // =========================
-  prefix: "/",
+  prefix: "/", "!"
 
   // =========================
   // BOT PRESENCE (what users see under the bot name)
@@ -29,10 +29,10 @@ export const botConfig = {
     // 5 = Competing
     activities: [
       {
-        // Text users will see (example: "Playing /help | Titan Bot").
-        name: "Frontiers Entertainment (Alpy)",
+        // Text users will see (example: "Playing /help | Frontiers Bot").
+        name: "Frontiers Competitive",
         // Activity type number (0 = Playing).
-        type: 5, 
+        type: 3, 
       },
     ],
   },
@@ -141,7 +141,7 @@ export const botConfig = {
     },
     footer: {
       // Default footer text used in bot embeds.
-      text: "Titan Bot",
+      text: "Frontiers Bot",
       // Footer icon URL (null = no icon).
       icon: null,
     },
