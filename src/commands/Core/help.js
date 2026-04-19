@@ -171,7 +171,7 @@ async function createInitialHelpMenu() {
         .setURL("https://discord.com/channels/1481587512534106134/1486750183629783262")
         .setStyle(ButtonStyle.Link);
 
-    const touchpointButton = new ButtonBuilder()
+    const frontiersButton = new ButtonBuilder()
         .setLabel("Server Info?")
         .setURL("https://discord.com/channels/1481587512534106134/1493875742910447636")
         .setStyle(ButtonStyle.Link);
@@ -185,7 +185,7 @@ async function createInitialHelpMenu() {
     const buttonRow = new ActionRowBuilder().addComponents([
         bugReportButton,
         supportButton,
-        touchpointButton,
+        frontiersButton,
     ]);
 
     return {
