@@ -142,35 +142,103 @@ async function awardRoleReward(guild, member, roleId, level) {
 
 
 
-async function sendLevelUpAnnouncement(guild, member, levelData, config) {
-  try {
-    const levelUpChannel = config.levelUpChannel 
-      ? guild.channels.cache.get(config.levelUpChannel) 
-      : guild.systemChannel;
-    
-    if (!levelUpChannel || !levelUpChannel.isTextBased()) {
-      return;
-    }
-
-    
-    const permissions = levelUpChannel.permissionsFor(guild.members.me);
-    if (!permissions || !permissions.has(['SendMessages', 'EmbedLinks'])) {
-      logger.warn(`Missing permissions to send levelup message in ${levelUpChannel.id}`);
-      return;
-    }
-
-    const message = config.levelUpMessage
-      .replace(/{user}/g, member.toString())
-      .replace(/{level}/g, levelData.level)
-      .replace(/{xp}/g, levelData.xp)
-      .replace(/{xpNeeded}/g, getXpForLevel(levelData.level + 1));
-    
-    await levelUpChannel.send(message).catch(error => {
-      logger.error(`Failed to send level up message in channel ${levelUpChannel.id}:`, error);
-    });
-  } catch (error) {
-    logger.error('Error sending level up announcement:', error);
+function getLevelColor(level) {
+    if (level >= 100) return '#F4D03F';
+    if (level >= 75)  return '#A569BD';
+    if (level >= 50)  return '#5DADE2';
+    if (level >= 25)  return '#48C9B0';
+    if (level >= 10)  return '#58D68D';
+    return '#BDC3C7';
   }
-}
+
+  function getLevelBadge(level) {
+    if (level >= 100) return '👑';
+    if (level >= 75)  return '💎';
+    if (level >= 50)  return '🔥';
+    if (level >= 25)  return '⚡';
+    if (level >= 10)  return '🌟';
+    return '🌱';
+  }
+
+  function getTierLabel(level) {
+    if (level >= 100) return 'Legendary';
+    if (level >= 75)  return 'Diamond';
+    if (level >= 50)  return 'Platinum';
+    if (level >= 25)  return 'Gold';
+    if (level >= 10)  return 'Silver';
+    return 'Bronze';
+  }
+
+  function createLevelProgressBar(current, max, length = 14) {
+    const pct = max > 0 ? Math.min(current / max, 1) : 0;
+    const filled = Math.round(pct * length);
+    const bar = '█'.repeat(filled) + '░'.repeat(length - filled);
+    return `\`${bar}\` ${Math.floor(pct * 100)}%`;
+  }
+
+  function fmtNum(n) {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+    return String(n);
+  }
+
+  async function sendLevelUpAnnouncement(guild, member, levelData, config) {
+    try {
+      const levelUpChannel = config.levelUpChannel
+        ? guild.channels.cache.get(config.levelUpChannel)
+        : guild.systemChannel;
+
+      if (!levelUpChannel || !levelUpChannel.isTextBased()) return;
+
+      const permissions = levelUpChannel.permissionsFor(guild.members.me);
+      if (!permissions || !permissions.has(['SendMessages', 'EmbedLinks'])) {
+        logger.warn(`Missing permissions to send levelup message in ${levelUpChannel.id}`);
+        return;
+      }
+
+      const { EmbedBuilder } = await import('discord.js');
+
+      const level    = levelData.level;
+      const xpNow    = levelData.xp;
+      const xpNeeded = getXpForLevel(level + 1);
+      const totalXp  = levelData.totalXp;
+      const color    = getLevelColor(level);
+      const badge    = getLevelBadge(level);
+      const tier     = getTierLabel(level);
+      const bar      = createLevelProgressBar(xpNow, xpNeeded);
+
+      const customMsg = (config.levelUpMessage || '{user} leveled up to level {level}!')
+        .replace(/{user}/g, member.displayName)
+        .replace(/{level}/g, level)
+        .replace(/{xp}/g, fmtNum(xpNow))
+        .replace(/{xpNeeded}/g, fmtNum(xpNeeded));
+
+      const embed = new EmbedBuilder()
+        .setColor(color)
+        .setTitle(`${badge}  Level Up!`)
+        .setDescription(
+          `> ${customMsg}\n` +
+          `> **Tier Reached:** ${tier}`
+        )
+        .setThumbnail(member.displayAvatarURL({ dynamic: true, size: 256 }))
+        .addFields(
+          { name: '🎚️ New Level',  value: `**${level}**`,                                      inline: true },
+          { name: '✨ Total XP',   value: `**${fmtNum(totalXp)}**`,                             inline: true },
+          { name: '⭐ Next Level', value: `**${fmtNum(xpNow)}** / ${fmtNum(xpNeeded)}`,        inline: true },
+          { name: `Progress to Level ${level + 1}`, value: bar },
+        )
+        .setFooter({
+          text: guild.name,
+          iconURL: guild.iconURL({ dynamic: true }) ?? undefined,
+        })
+        .setTimestamp();
+
+      await levelUpChannel.send({ content: `${member}`, embeds: [embed] }).catch(err => {
+        logger.error(`Failed to send level up message in channel ${levelUpChannel.id}:`, err);
+      });
+    } catch (error) {
+      logger.error('Error sending level up announcement:', error);
+    }
+  }
 
 
