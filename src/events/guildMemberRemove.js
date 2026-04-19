@@ -56,10 +56,6 @@ export default {
                         .setDescription(goodbyeMessage)
                         .setColor(welcomeConfig.leaveEmbed?.color || getColor('error'))
                         .setThumbnail(user.displayAvatarURL())
-                        .addFields(
-                            { name: 'User', value: `${user.tag} (${user.id})`, inline: true },
-                            { name: 'Member Count', value: guild.memberCount.toString(), inline: true }
-                        )
                         .setTimestamp()
                         .setFooter({ text: embedFooter });
 
