@@ -121,7 +121,6 @@ export async function createTicket(guild, member, categoryId, reason = 'No reaso
       const priorityInfo = PRIORITY_MAP[priority];
       if (priorityInfo) channelName = `${priorityInfo.emoji} ${channelName}`;
     }
-    }
     
     const channel = await guild.channels.create({
       name: channelName,
