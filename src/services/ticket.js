@@ -110,13 +110,19 @@ export async function createTicket(guild, member, categoryId, reason = 'No reaso
     
     const ticketNumber = await getNextTicketNumber(guild.id);
     
-    let channelName = `ticket-${ticketNumber}`;
-    
+    // Parse ticket type from reason prefix [Type: label]
+    const typeMatch = reason.match(/^\[([^\]]+)\]/);
+    const ticketTypeLabel = typeMatch ? typeMatch[1] : null;
+    const cleanReason = typeMatch ? reason.replace(/^\[[^\]]+\]\s*/, '') : reason;
+    const typeSlug = ticketTypeLabel === 'Content Creator' ? 'creator'
+      : ticketTypeLabel === 'Partnership' ? 'partner'
+      : ticketTypeLabel === 'Support' ? 'support'
+      : 'ticket';
+    let channelName = `${typeSlug}-${ticketNumber}`;
     if (priority !== 'none') {
       const priorityInfo = PRIORITY_MAP[priority];
-      if (priorityInfo) {
-        channelName = `${priorityInfo.emoji} ${channelName}`;
-      }
+      if (priorityInfo) channelName = `${priorityInfo.emoji} ${channelName}`;
+    }
     }
     
     const channel = await guild.channels.create({
@@ -164,16 +170,32 @@ export async function createTicket(guild, member, categoryId, reason = 'No reaso
     
     const priorityInfo = PRIORITY_MAP[priority] || PRIORITY_MAP.none;
     
-    const embed = createEmbed({
-      title: `Ticket #${ticketNumber}`,
-      description: `${member.toString()}, thanks for creating a ticket!\n\n**Reason:** ${reason}\n**Priority:** ${priorityInfo.emoji} ${priorityInfo.label}`,
-      color: priorityInfo.color,
-      fields: [
-        { name: 'Status', value: '🟢 Open', inline: true },
-        { name: 'Claimed By', value: 'Not claimed', inline: true },
-        { name: 'Created', value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true },
-      ],
-    });
+    const typeConfig = {
+      'Support':          { color: '#5DADE2', emoji: '🎫', next: 'A staff member will be with you shortly. Please describe your issue in detail.' },
+      'Content Creator':  { color: '#58D68D', emoji: '🎬', next: 'Share your content links, channel stats, and a brief intro about yourself.' },
+      'Partnership':      { color: '#A569BD', emoji: '🤝', next: 'Share your server name, member count, and what you expect from the partnership.' },
+    }[ticketTypeLabel] || { color: priorityInfo.color, emoji: '🎫', next: 'A staff member will be with you shortly.' };
+
+    const embed = new EmbedBuilder()
+      .setColor(typeConfig.color)
+      .setTitle(`${typeConfig.emoji}  Ticket #${ticketNumber}`)
+      .setThumbnail(member.displayAvatarURL({ dynamic: true, size: 256 }))
+      .setDescription(
+        `Welcome ${member}! Your ticket has been opened.\n` +
+        `A member of our team will be with you shortly.\n` +
+        `\n> **Please do not ping staff** — they will respond as soon as possible.`
+      )
+      .addFields(
+        { name: '📋 Ticket Type',  value: ticketTypeLabel ? `**${typeConfig.emoji} ${ticketTypeLabel}**` : '**🎫 General**', inline: true },
+        { name: '🟢 Status',       value: '**Open**',        inline: true },
+        { name: '🙋 Claimed By',   value: '**Unclaimed**',   inline: true },
+        { name: '💬 Reason',       value: cleanReason || reason, inline: false },
+        { name: '📌 What to do next', value: typeConfig.next, inline: false },
+        { name: '⏰ Opened',       value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true },
+        { name: '⚡ Priority',     value: `${priorityInfo.emoji} ${priorityInfo.label}`, inline: true },
+      )
+      .setFooter({ text: `${guild.name} • Use the buttons below to manage this ticket`, iconURL: guild.iconURL({ dynamic: true }) ?? undefined })
+      .setTimestamp();
     
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
