@@ -119,7 +119,7 @@ async function createCategorySelectMenu() {
     );
 
     embed.setFooter({
-        text: "Frontiers Entertainment (by Alpy)"
+        text: "Frontiers Competitive"
     });
     embed.setTimestamp();
 
@@ -133,8 +133,8 @@ async function createCategorySelectMenu() {
         .setURL("https://discord.com/channels/1481587512534106134/1486750183629783262")
         .setStyle(ButtonStyle.Link);
 
-    const FrontiersButton = new ButtonBuilder()
-        .setLabel("Learn from Alpy")
+    const frontiersButton = new ButtonBuilder()
+        .setLabel("Frontiers Competitive")
         .setURL("http://dsc.gg/frontierscompetitive")
         .setStyle(ButtonStyle.Link);
 
@@ -147,7 +147,7 @@ async function createCategorySelectMenu() {
     const buttonRow = new ActionRowBuilder().addComponents([
         bugReportButton,
         supportButton,
-        touchpointButton,
+        frontiersButton,
     ]);
 
     return {
