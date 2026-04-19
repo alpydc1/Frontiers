@@ -1,7 +1,7 @@
 {
-  "name": "titanbot-custom",
+  "name": "frontiersbot-custom",
   "version": "2.0.0",
-  "description": "Modular Ultimate Community Bot by Touchpoint Support",
+  "description": "Modular Ultimate Community Bot by Frontiers Competitive",
   "main": "src/app.js",
   "type": "module",
   "scripts": {
