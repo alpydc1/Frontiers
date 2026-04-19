@@ -1092,11 +1092,14 @@ export default {
             };
 
             await refreshDashboard(interaction, state);
+            const dashboardMessage = await interaction.fetchReply().catch(() => null);
 
             const collector = interaction.channel.createMessageComponentCollector({
                 componentType: ComponentType.StringSelect,
                 filter: i =>
-                    i.user.id === interaction.user.id && i.customId === 'eb_menu',
+                    i.user.id === interaction.user.id &&
+                    i.customId === 'eb_menu' &&
+                    (dashboardMessage ? i.message.id === dashboardMessage.id : true),
                 time: IDLE_TIMEOUT,
             });
 
