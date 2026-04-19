@@ -130,23 +130,39 @@ const createTicketHandler = {
         });
       }
       
-      const modal = new ModalBuilder()
-        .setCustomId('create_ticket_modal')
-        .setTitle('Create a Ticket');
+      // Show ticket type selector
+        const { StringSelectMenuBuilder, StringSelectMenuOptionBuilder, EmbedBuilder } = await import('discord.js');
+        const typeSelect = new StringSelectMenuBuilder()
+          .setCustomId('ticket_type_select')
+          .setPlaceholder('Select a ticket type...')
+          .addOptions(
+            new StringSelectMenuOptionBuilder()
+              .setLabel('General Support')
+              .setDescription('Need help or have a general question')
+              .setValue('support')
+              .setEmoji('🎫'),
+            new StringSelectMenuOptionBuilder()
+              .setLabel('Content Creator Application')
+              .setDescription('Apply to become a content creator')
+              .setValue('content_creator')
+              .setEmoji('🎬'),
+            new StringSelectMenuOptionBuilder()
+              .setLabel('Partnership')
+              .setDescription('Apply for a partnership with us')
+              .setValue('partnership')
+              .setEmoji('🤝'),
+          );
 
-      const reasonInput = new TextInputBuilder()
-        .setCustomId('reason')
-        .setLabel('Why are you creating this ticket?')
-        .setStyle(TextInputStyle.Paragraph)
-        .setPlaceholder('Describe your issue...')
-        .setRequired(true)
-        .setMaxLength(1000);
-
-      const actionRow = new ActionRowBuilder().addComponents(reasonInput);
-      modal.addComponents(actionRow);
-      
-      // showModal must be called directly without defer
-      await interaction.showModal(modal);
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor('#5865F2')
+              .setTitle('🎫 Create a Ticket')
+              .setDescription('Please select the type of ticket you want to open:'),
+          ],
+          components: [new ActionRowBuilder().addComponents(typeSelect)],
+          flags: MessageFlags.Ephemeral,
+        });
     } catch (error) {
       logger.error('Error creating ticket modal:', error);
       if (!interaction.replied && !interaction.deferred) {
@@ -161,7 +177,7 @@ const createTicketHandler = {
 
 const createTicketModalHandler = {
   name: 'create_ticket_modal',
-  async execute(interaction, client) {
+  async execute(interaction, client, args = []) {
     try {
       if (!(await ensureGuildContext(interaction))) return;
 
@@ -169,6 +185,9 @@ const createTicketModalHandler = {
       if (!deferSuccess) return;
       
       const reason = interaction.fields.getTextInputValue('reason');
+      const ticketType = args?.[0] || 'support';
+      const typeLabels = { support: 'Support', content_creator: 'Content Creator', partnership: 'Partnership' };
+      const typeLabel = typeLabels[ticketType] || 'Support';
       const config = await getGuildConfig(client, interaction.guildId);
       const categoryId = config.ticketCategoryId || null;
       
@@ -176,7 +195,7 @@ const createTicketModalHandler = {
         interaction.guild,
         interaction.member,
         categoryId,
-        reason
+        `[${typeLabel}] ${reason}`
       );
       
       if (result.success) {
