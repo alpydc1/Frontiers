@@ -55,6 +55,7 @@ function buildDashboardEmbed(config, guild) {
             { name: '📂 Closed Tickets Category', value: closedCategory, inline: true },
             { name: '\u200B', value: '\u200B', inline: true },
             { name: '📝 Panel Message', value: panelMsg, inline: false },
+            { name: '🖼️ Panel Image', value: config.ticketPanelImageUrl ? '✅ Set' : '❌ Not set', inline: true },
             { name: '🏷️ Button Label', value: btnLabel, inline: true },
             { name: '🔢 Max Tickets/User', value: String(config.maxTicketsPerUser || 3), inline: true },
             { name: '📬 DM on Close', value: config.dmOnClose !== false ? '✅ Enabled' : '❌ Disabled', inline: true },
@@ -75,6 +76,11 @@ function buildSelectMenu(guildId) {
                 .setDescription('Change the message displayed on the ticket creation panel')
                 .setValue('panel_message')
                 .setEmoji('📝'),
+            new StringSelectMenuOptionBuilder()
+                .setLabel('Edit Panel Image')
+                .setDescription('Set an image URL to display in the ticket panel embed')
+                .setValue('panel_image')
+                .setEmoji('🖼️'),
             new StringSelectMenuOptionBuilder()
                 .setLabel('Edit Button Label')
                 .setDescription('Change the label on the Create Ticket button')
@@ -166,6 +172,7 @@ async function updateLivePanel(client, guild, config) {
             .setTitle('🎫 Support Tickets')
             .setDescription(config.ticketPanelMessage || 'Click the button below to create a support ticket.')
             .setColor(getColor('info'));
+        if (config.ticketPanelImageUrl) updatedEmbed.setImage(config.ticketPanelImageUrl);
 
         const button = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -238,6 +245,9 @@ export default {
                     switch (selectedOption) {
                         case 'panel_message':
                             await handlePanelMessage(selectInteraction, interaction, guildConfig, guildId, client);
+                            break;
+                        case 'panel_image':
+                            await handlePanelImage(selectInteraction, interaction, guildConfig, guildId, client);
                             break;
                         case 'button_label':
                             await handleButtonLabel(selectInteraction, interaction, guildConfig, guildId, client);
@@ -397,7 +407,68 @@ async function handlePanelMessage(selectInteraction, rootInteraction, guildConfi
     await refreshDashboard(rootInteraction, guildConfig, guildId);
 }
 
-// ─── Button Label ─────────────────────────────────────────────────────────────
+// ─── Panel Image ──────────────────────────────────────────────────────────────
+
+  async function handlePanelImage(selectInteraction, rootInteraction, guildConfig, guildId, client) {
+      const modal = new ModalBuilder()
+          .setCustomId('ticket_cfg_panel_image')
+          .setTitle('Edit Panel Image')
+          .addComponents(
+              new ActionRowBuilder().addComponents(
+                  new TextInputBuilder()
+                      .setCustomId('panel_image_input')
+                      .setLabel('Image URL (paste from Discord CDN)')
+                      .setStyle(TextInputStyle.Short)
+                      .setValue(guildConfig.ticketPanelImageUrl || '')
+                      .setMaxLength(1000)
+                      .setRequired(false)
+                      .setPlaceholder('https://cdn.discordapp.com/... (leave blank to remove)'),
+              ),
+          );
+
+      await selectInteraction.showModal(modal);
+
+      const submitted = await selectInteraction
+          .awaitModalSubmit({
+              filter: i =>
+                  i.customId === 'ticket_cfg_panel_image' && i.user.id === selectInteraction.user.id,
+              time: 120_000,
+          })
+          .catch(() => null);
+
+      if (!submitted) return;
+
+      const rawUrl = submitted.fields.getTextInputValue('panel_image_input').trim();
+
+      if (rawUrl && !rawUrl.startsWith('https://')) {
+          await submitted.reply({
+              embeds: [errorEmbed('Invalid URL', 'The image URL must start with **https://**. Paste a Discord CDN link.')],
+              flags: MessageFlags.Ephemeral,
+          });
+          return;
+      }
+
+      guildConfig.ticketPanelImageUrl = rawUrl || null;
+      await client.db.set(getGuildConfigKey(guildId), guildConfig);
+
+      const panelUpdated = await updateLivePanel(client, rootInteraction.guild, guildConfig);
+
+      await submitted.reply({
+          embeds: [
+              successEmbed(
+                  rawUrl ? '✅ Panel Image Set' : '✅ Panel Image Removed',
+                  rawUrl
+                      ? `The panel image has been updated.${panelUpdated ? '\nThe live ticket panel has also been refreshed.' : '\n> **Note:** The live panel could not be located. The image will apply the next time you run \`/ticket setup\`.'}`
+                      : `The panel image has been removed.${panelUpdated ? '\nThe live ticket panel has also been updated.' : ''}`,
+              ),
+          ],
+          flags: MessageFlags.Ephemeral,
+      });
+
+      await refreshDashboard(rootInteraction, guildConfig, guildId);
+  }
+
+  // ─── Button Label ─────────────────────────────────────────────────────────────
 
 async function handleButtonLabel(selectInteraction, rootInteraction, guildConfig, guildId, client) {
     const modal = new ModalBuilder()
