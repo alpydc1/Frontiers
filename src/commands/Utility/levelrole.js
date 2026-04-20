@@ -9,7 +9,6 @@ import { getColor } from '../../config/bot.js';
 import { logger } from '../../utils/logger.js';
 import { TitanBotError, ErrorTypes } from '../../utils/errorHandler.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
-import { getLevelingConfig, saveLevelingConfig } from '../../services/leveling.js';
 
 export default {
     data: new SlashCommandBuilder()
@@ -49,7 +48,6 @@ export default {
 
             const sub     = interaction.options.getSubcommand();
             const guildId = interaction.guild.id;
-            const client  = interaction.client;
 
             if (sub === 'set') {
                 const level = interaction.options.getInteger('level');
@@ -69,16 +67,6 @@ export default {
                 if (error) {
                     logger.error('levelrole set error:', error);
                     throw new TitanBotError('DB upsert failed', ErrorTypes.DATABASE, 'Failed to save the level role. Please try again.');
-                }
-
-                // Also save to guild config so the XP system can read it
-                try {
-                    const config = await getLevelingConfig(client, guildId);
-                    config.roleRewards = config.roleRewards || {};
-                    config.roleRewards[level] = role.id;
-                    await saveLevelingConfig(client, guildId, config);
-                } catch (cfgErr) {
-                    logger.warn('Could not sync role to guild config:', cfgErr);
                 }
 
                 await InteractionHelper.safeEditReply(interaction, {
@@ -101,17 +89,6 @@ export default {
                 if (error) {
                     logger.error('levelrole remove error:', error);
                     throw new TitanBotError('DB delete failed', ErrorTypes.DATABASE, 'Failed to remove the level role. Please try again.');
-                }
-
-                // Also remove from guild config
-                try {
-                    const config = await getLevelingConfig(client, guildId);
-                    if (config.roleRewards) {
-                        delete config.roleRewards[level];
-                        await saveLevelingConfig(client, guildId, config);
-                    }
-                } catch (cfgErr) {
-                    logger.warn('Could not sync removal to guild config:', cfgErr);
                 }
 
                 await InteractionHelper.safeEditReply(interaction, {
@@ -179,18 +156,6 @@ export default {
                     if (error) {
                         logger.error('levelrole setup upsert error:', error);
                         throw new TitanBotError('DB upsert failed', ErrorTypes.DATABASE, 'Failed to save level roles. Please try again.');
-                    }
-
-                    // Also save all matched roles to guild config
-                    try {
-                        const config = await getLevelingConfig(client, guildId);
-                        config.roleRewards = config.roleRewards || {};
-                        for (const { level, role } of matched) {
-                            config.roleRewards[level] = role.id;
-                        }
-                        await saveLevelingConfig(client, guildId, config);
-                    } catch (cfgErr) {
-                        logger.warn('Could not sync setup roles to guild config:', cfgErr);
                     }
                 }
 
