@@ -9,6 +9,7 @@ import { getColor } from '../../config/bot.js';
 import { logger } from '../../utils/logger.js';
 import { TitanBotError, ErrorTypes } from '../../utils/errorHandler.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
+import { getGuildConfig, setGuildConfig } from '../../services/guildConfig.js';
 
 export default {
     data: new SlashCommandBuilder()
@@ -39,6 +40,9 @@ export default {
         )
         .addSubcommand(sub =>
             sub.setName('setup').setDescription('Auto-detect Level 1, 5, 10, 15, 20, 25, 30, 40, 50 roles and link them all at once'),
+        )
+        .addSubcommand(sub =>
+            sub.setName('link').setDescription('Scan all roles named "Level X" and activate auto-role rewards for each one'),
         ),
 
     async execute(interaction) {
@@ -48,6 +52,7 @@ export default {
 
             const sub     = interaction.options.getSubcommand();
             const guildId = interaction.guild.id;
+            const client  = interaction.client;
 
             if (sub === 'set') {
                 const level = interaction.options.getInteger('level');
@@ -67,6 +72,17 @@ export default {
                 if (error) {
                     logger.error('levelrole set error:', error);
                     throw new TitanBotError('DB upsert failed', ErrorTypes.DATABASE, 'Failed to save the level role. Please try again.');
+                }
+
+                // Sync to guild config so the XP system picks it up
+                try {
+                    const guildConfig = await getGuildConfig(client, guildId);
+                    if (!guildConfig.leveling) guildConfig.leveling = {};
+                    if (!guildConfig.leveling.roleRewards) guildConfig.leveling.roleRewards = {};
+                    guildConfig.leveling.roleRewards[level] = role.id;
+                    await setGuildConfig(client, guildId, guildConfig);
+                } catch (cfgErr) {
+                    logger.warn('Could not sync role reward to guild config:', cfgErr);
                 }
 
                 await InteractionHelper.safeEditReply(interaction, {
@@ -89,6 +105,17 @@ export default {
                 if (error) {
                     logger.error('levelrole remove error:', error);
                     throw new TitanBotError('DB delete failed', ErrorTypes.DATABASE, 'Failed to remove the level role. Please try again.');
+                }
+
+                // Remove from guild config too
+                try {
+                    const guildConfig = await getGuildConfig(client, guildId);
+                    if (guildConfig.leveling && guildConfig.leveling.roleRewards) {
+                        delete guildConfig.leveling.roleRewards[level];
+                        await setGuildConfig(client, guildId, guildConfig);
+                    }
+                } catch (cfgErr) {
+                    logger.warn('Could not remove role reward from guild config:', cfgErr);
                 }
 
                 await InteractionHelper.safeEditReply(interaction, {
@@ -114,7 +141,7 @@ export default {
                 if (!rows || rows.length === 0) {
                     await InteractionHelper.safeEditReply(interaction, {
                         embeds: [new EmbedBuilder()
-                            .setDescription('No level roles configured yet.\nUse `/levelrole set` to link a role to a level.')
+                            .setDescription('No level roles configured yet.\nUse `/levelrole link` to auto-link all your Level roles.')
                             .setColor(getColor('info'))],
                     });
                     return;
@@ -173,6 +200,76 @@ export default {
                 await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
                 return;
             }
+
+            if (sub === 'link') {
+                // Scan ALL roles in the server for any named "Level X"
+                const allRoles = interaction.guild.roles.cache;
+                const levelPattern = /^Level\s+(\d+)$/i;
+
+                const matched    = [];
+                const upsertRows = [];
+
+                for (const [, role] of allRoles) {
+                    if (role.managed) continue;
+                    const match = role.name.match(levelPattern);
+                    if (!match) continue;
+
+                    const level = parseInt(match[1], 10);
+                    if (level < 1 || level > 1000) continue;
+
+                    matched.push({ level, role });
+                    upsertRows.push({ guild_id: guildId, level, role_id: role.id });
+                }
+
+                if (matched.length === 0) {
+                    await InteractionHelper.safeEditReply(interaction, {
+                        embeds: [new EmbedBuilder()
+                            .setDescription('❌ No roles named "Level X" found in this server.\nMake sure your roles are named exactly like: `Level 1`, `Level 5`, `Level 10`, etc.')
+                            .setColor(getColor('error'))],
+                    });
+                    return;
+                }
+
+                // Sort by level for clean display
+                matched.sort((a, b) => a.level - b.level);
+
+                // Save to Supabase
+                const { error } = await supabase
+                    .from('level_roles')
+                    .upsert(upsertRows, { onConflict: 'guild_id,level' });
+
+                if (error) {
+                    logger.error('levelrole link upsert error:', error);
+                    throw new TitanBotError('DB upsert failed', ErrorTypes.DATABASE, 'Failed to save level roles. Please try again.');
+                }
+
+                // Save to guild config so the XP system awards roles on level up
+                try {
+                    const guildConfig = await getGuildConfig(client, guildId);
+                    if (!guildConfig.leveling) guildConfig.leveling = {};
+                    if (!guildConfig.leveling.roleRewards) guildConfig.leveling.roleRewards = {};
+
+                    for (const { level, role } of matched) {
+                        guildConfig.leveling.roleRewards[level] = role.id;
+                    }
+
+                    await setGuildConfig(client, guildId, guildConfig);
+                } catch (cfgErr) {
+                    logger.warn('Could not sync linked roles to guild config:', cfgErr);
+                }
+
+                const lines = matched.map(({ level, role }) => `✅ **Level ${level}** → ${role}`);
+
+                const embed = new EmbedBuilder()
+                    .setTitle('Level Roles Linked')
+                    .setDescription(lines.join('\n'))
+                    .setColor(getColor('success'))
+                    .setFooter({ text: `${matched.length} role${matched.length === 1 ? '' : 's'} linked — users will now auto-receive these on level up` });
+
+                await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
+                return;
+            }
+
         } catch (error) {
             if (error instanceof TitanBotError) throw error;
             logger.error('Unexpected error in /levelrole:', error);
