@@ -1,52 +1,39 @@
 import { logger } from '../utils/logger.js';
 import { getLevelingConfig, getXpForLevel, getUserLevelData, saveUserLevelData } from './leveling.js';
 import { logEvent, EVENT_TYPES } from './loggingService.js';
-import { supabase } from '../lib/supabase.js';
 
 export async function addXp(client, guild, member, xpToAdd) {
   try {
-    
     if (!xpToAdd || xpToAdd <= 0) {
       return { success: false, reason: 'Invalid XP amount' };
     }
 
     const config = await getLevelingConfig(client, guild.id);
-    
+
     if (!config.enabled) {
       return { success: false, reason: 'Leveling is disabled in this server' };
     }
-    
+
     const levelData = await getUserLevelData(client, guild.id, member.user.id);
-    
+
     levelData.xp += xpToAdd;
     levelData.totalXp += xpToAdd;
     levelData.lastMessage = Date.now();
-    
+
     const xpNeededForNextLevel = getXpForLevel(levelData.level + 1);
     let didLevelUp = false;
-    
+
     if (levelData.xp >= xpNeededForNextLevel) {
       levelData.level += 1;
       levelData.xp = levelData.xp - xpNeededForNextLevel;
       didLevelUp = true;
-      
-      logger.info(`🎉 ${member.user.tag} leveled up to level ${levelData.level} in ${guild.name}`);
-      
-      try {
-        const { data: levelRole } = await supabase
-          .from('level_roles')
-          .select('role_id')
-          .eq('guild_id', guild.id)
-          .eq('level', levelData.level)
-          .single();
 
-        if (levelRole?.role_id) {
-          await awardRoleReward(guild, member, levelRole.role_id, levelData.level);
-        }
-      } catch (roleError) {
-        logger.error('Error fetching level role from Supabase:', roleError);
+      logger.info(`🎉 ${member.user.tag} leveled up to level ${levelData.level} in ${guild.name}`);
+
+      if (config.roleRewards && config.roleRewards[levelData.level]) {
+        await awardRoleReward(guild, member, config.roleRewards[levelData.level], levelData.level);
       }
-      
+
       if (config.announceLevelUp) {
         await sendLevelUpAnnouncement(guild, member, levelData, config);
       }
@@ -60,30 +47,18 @@ export async function addXp(client, guild, member, xpToAdd) {
             description: `${member.user.tag} reached level ${levelData.level}`,
             userId: member.user.id,
             fields: [
-              {
-                name: '👤 Member',
-                value: `${member.user.tag} (${member.user.id})`,
-                inline: true
-              },
-              {
-                name: '📊 New Level',
-                value: levelData.level.toString(),
-                inline: true
-              },
-              {
-                name: '✨ Total XP',
-                value: levelData.totalXp.toString(),
-                inline: true
-              }
+              { name: '👤 Member', value: `${member.user.tag} (${member.user.id})`, inline: true },
+              { name: '📊 New Level', value: levelData.level.toString(), inline: true },
+              { name: '✨ Total XP', value: levelData.totalXp.toString(), inline: true }
             ]
           }
         });
       } catch {
       }
     }
-    
+
     await saveUserLevelData(client, guild.id, member.user.id, levelData);
-    
+
     return {
       success: true,
       level: levelData.level,
@@ -92,7 +67,7 @@ export async function addXp(client, guild, member, xpToAdd) {
       xpNeeded: getXpForLevel(levelData.level + 1),
       leveledUp: didLevelUp
     };
-    
+
   } catch (error) {
     logger.error('Error adding XP:', error);
     return { success: false, error: error.message };
@@ -102,7 +77,7 @@ export async function addXp(client, guild, member, xpToAdd) {
 async function awardRoleReward(guild, member, roleId, level) {
   try {
     const role = guild.roles.cache.get(roleId);
-    
+
     if (!role) {
       logger.warn(`Role ${roleId} not found for level ${level} reward in guild ${guild.id}`);
       return;
@@ -193,21 +168,15 @@ async function sendLevelUpAnnouncement(guild, member, levelData, config) {
     const embed = new EmbedBuilder()
       .setColor(color)
       .setTitle(`${badge}  Level Up!`)
-      .setDescription(
-        `> ${customMsg}\n` +
-        `> **Tier Reached:** ${tier}`
-      )
+      .setDescription(`> ${customMsg}\n> **Tier Reached:** ${tier}`)
       .setThumbnail(member.displayAvatarURL({ dynamic: true, size: 256 }))
       .addFields(
-        { name: '🎚️ New Level',  value: `**${level}**`,                                      inline: true },
-        { name: '✨ Total XP',   value: `**${fmtNum(totalXp)}**`,                             inline: true },
-        { name: '⭐ Next Level', value: `**${fmtNum(xpNow)}** / ${fmtNum(xpNeeded)}`,        inline: true },
+        { name: '🎚️ New Level',  value: `**${level}**`,                                 inline: true },
+        { name: '✨ Total XP',   value: `**${fmtNum(totalXp)}**`,                        inline: true },
+        { name: '⭐ Next Level', value: `**${fmtNum(xpNow)}** / ${fmtNum(xpNeeded)}`,   inline: true },
         { name: `Progress to Level ${level + 1}`, value: bar },
       )
-      .setFooter({
-        text: guild.name,
-        iconURL: guild.iconURL({ dynamic: true }) ?? undefined,
-      })
+      .setFooter({ text: guild.name, iconURL: guild.iconURL({ dynamic: true }) ?? undefined })
       .setTimestamp();
 
     await levelUpChannel.send({ content: `${member}`, embeds: [embed] }).catch(err => {
