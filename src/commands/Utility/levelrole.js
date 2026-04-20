@@ -4,11 +4,19 @@ import {
     PermissionFlagsBits,
     MessageFlags,
 } from 'discord.js';
-import { supabase } from '../../lib/supabase.js';
 import { getColor } from '../../config/bot.js';
 import { logger } from '../../utils/logger.js';
 import { TitanBotError, ErrorTypes } from '../../utils/errorHandler.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
+
+// Lazy-load supabase so a missing/broken supabase.js never prevents this command from loading
+let _supabase = null;
+async function getSupabase() {
+    if (_supabase) return _supabase;
+    const mod = await import('../../lib/supabase.js');
+    _supabase = mod.supabase;
+    return _supabase;
+}
 
 async function syncToGuildConfig(client, guildId, updates) {
     try {
@@ -44,12 +52,12 @@ export default {
         .addSubcommand(sub =>
             sub
                 .setName('set')
-                .setDescription('Link a role to a level (users get this role when they reach that level)')
+                .setDescription('Link a role to a level')
                 .addIntegerOption(opt =>
                     opt.setName('level').setDescription('Level number (1–50)').setMinValue(1).setMaxValue(50).setRequired(true),
                 )
                 .addRoleOption(opt =>
-                    opt.setName('role').setDescription('Role to assign when users reach this level').setRequired(true),
+                    opt.setName('role').setDescription('Role to assign at this level').setRequired(true),
                 ),
         )
         .addSubcommand(sub =>
@@ -61,13 +69,13 @@ export default {
                 ),
         )
         .addSubcommand(sub =>
-            sub.setName('list').setDescription('Show all level → role mappings configured for this server'),
+            sub.setName('list').setDescription('Show all level → role mappings for this server'),
         )
         .addSubcommand(sub =>
-            sub.setName('setup').setDescription('Auto-detect Level 1, 5, 10, 15, 20, 25, 30, 40, 50 roles and link them all at once'),
+            sub.setName('setup').setDescription('Auto-detect Level 1, 5, 10, 15, 20, 25, 30, 40, 50 roles and link them'),
         )
         .addSubcommand(sub =>
-            sub.setName('link').setDescription('Scan all roles named "Level X" and activate auto-role rewards for each one'),
+            sub.setName('link').setDescription('Scan all roles named "Level X" and activate auto-role rewards'),
         ),
 
     async execute(interaction) {
@@ -75,6 +83,7 @@ export default {
             const deferSuccess = await InteractionHelper.safeDefer(interaction, { flags: MessageFlags.Ephemeral });
             if (!deferSuccess) return;
 
+            const supabase = await getSupabase();
             const sub     = interaction.options.getSubcommand();
             const guildId = interaction.guild.id;
             const client  = interaction.client;
@@ -172,8 +181,7 @@ export default {
                 const upsertRows = [];
 
                 for (const level of MILESTONE_LEVELS) {
-                    const roleName = `Level ${level}`;
-                    const role = interaction.guild.roles.cache.find(r => r.name === roleName && !r.managed);
+                    const role = interaction.guild.roles.cache.find(r => r.name === `Level ${level}` && !r.managed);
                     if (role) {
                         matched.push({ level, role });
                         upsertRows.push({ guild_id: guildId, level, role_id: role.id });
@@ -192,32 +200,30 @@ export default {
                         throw new TitanBotError('DB upsert failed', ErrorTypes.DATABASE, 'Failed to save level roles. Please try again.');
                     }
 
-                    const rewardMap = Object.fromEntries(matched.map(({ level, role }) => [level, role.id]));
-                    await syncToGuildConfig(client, guildId, rewardMap);
+                    await syncToGuildConfig(client, guildId, Object.fromEntries(matched.map(({ level, role }) => [level, role.id])));
                 }
 
                 const lines = matched.map(({ level, role }) => `✅ **Level ${level}** → ${role}`);
                 if (missing.length > 0) {
-                    lines.push(`\n⚠️ Roles not found (create them with these exact names):\n${missing.map(l => `• \`Level ${l}\``).join('\n')}`);
+                    lines.push(`\n⚠️ Roles not found:\n${missing.map(l => `• \`Level ${l}\``).join('\n')}`);
                 }
 
-                const embed = new EmbedBuilder()
-                    .setTitle('Level Role Setup')
-                    .setDescription(lines.join('\n') || 'No matching roles found.')
-                    .setColor(matched.length > 0 ? getColor('success') : getColor('error'))
-                    .setFooter({ text: `${matched.length} role${matched.length === 1 ? '' : 's'} linked` });
-
-                await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
+                await InteractionHelper.safeEditReply(interaction, {
+                    embeds: [new EmbedBuilder()
+                        .setTitle('Level Role Setup')
+                        .setDescription(lines.join('\n') || 'No matching roles found.')
+                        .setColor(matched.length > 0 ? getColor('success') : getColor('error'))
+                        .setFooter({ text: `${matched.length} role${matched.length === 1 ? '' : 's'} linked` })],
+                });
                 return;
             }
 
             if (sub === 'link') {
-                const allRoles = interaction.guild.roles.cache;
                 const levelPattern = /^Level\s+(\d+)$/i;
                 const matched    = [];
                 const upsertRows = [];
 
-                for (const [, role] of allRoles) {
+                for (const [, role] of interaction.guild.roles.cache) {
                     if (role.managed) continue;
                     const match = role.name.match(levelPattern);
                     if (!match) continue;
@@ -230,7 +236,7 @@ export default {
                 if (matched.length === 0) {
                     await InteractionHelper.safeEditReply(interaction, {
                         embeds: [new EmbedBuilder()
-                            .setDescription('❌ No roles named "Level X" found in this server.\nMake sure your roles are named exactly like: `Level 1`, `Level 5`, `Level 10`, etc.')
+                            .setDescription('❌ No roles named "Level X" found.\nRoles must be named exactly: `Level 1`, `Level 5`, etc.')
                             .setColor(getColor('error'))],
                     });
                     return;
@@ -247,17 +253,15 @@ export default {
                     throw new TitanBotError('DB upsert failed', ErrorTypes.DATABASE, 'Failed to save level roles. Please try again.');
                 }
 
-                const rewardMap = Object.fromEntries(matched.map(({ level, role }) => [level, role.id]));
-                await syncToGuildConfig(client, guildId, rewardMap);
+                await syncToGuildConfig(client, guildId, Object.fromEntries(matched.map(({ level, role }) => [level, role.id])));
 
-                const lines = matched.map(({ level, role }) => `✅ **Level ${level}** → ${role}`);
-                const embed = new EmbedBuilder()
-                    .setTitle('Level Roles Linked')
-                    .setDescription(lines.join('\n'))
-                    .setColor(getColor('success'))
-                    .setFooter({ text: `${matched.length} role${matched.length === 1 ? '' : 's'} linked — users will now auto-receive these on level up` });
-
-                await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
+                await InteractionHelper.safeEditReply(interaction, {
+                    embeds: [new EmbedBuilder()
+                        .setTitle('Level Roles Linked')
+                        .setDescription(matched.map(({ level, role }) => `✅ **Level ${level}** → ${role}`).join('\n'))
+                        .setColor(getColor('success'))
+                        .setFooter({ text: `${matched.length} role${matched.length === 1 ? '' : 's'} linked — users will auto-receive these on level up` })],
+                });
                 return;
             }
 
