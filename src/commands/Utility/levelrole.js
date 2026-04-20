@@ -9,7 +9,32 @@ import { getColor } from '../../config/bot.js';
 import { logger } from '../../utils/logger.js';
 import { TitanBotError, ErrorTypes } from '../../utils/errorHandler.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
-import { getGuildConfig, setGuildConfig } from '../../services/guildConfig.js';
+
+async function syncToGuildConfig(client, guildId, updates) {
+    try {
+        const { getGuildConfig, setGuildConfig } = await import('../../services/guildConfig.js');
+        const guildConfig = await getGuildConfig(client, guildId);
+        if (!guildConfig.leveling) guildConfig.leveling = {};
+        if (!guildConfig.leveling.roleRewards) guildConfig.leveling.roleRewards = {};
+        Object.assign(guildConfig.leveling.roleRewards, updates);
+        await setGuildConfig(client, guildId, guildConfig);
+    } catch (err) {
+        logger.warn('Could not sync role rewards to guild config:', err);
+    }
+}
+
+async function removeFromGuildConfig(client, guildId, level) {
+    try {
+        const { getGuildConfig, setGuildConfig } = await import('../../services/guildConfig.js');
+        const guildConfig = await getGuildConfig(client, guildId);
+        if (guildConfig.leveling?.roleRewards) {
+            delete guildConfig.leveling.roleRewards[level];
+            await setGuildConfig(client, guildId, guildConfig);
+        }
+    } catch (err) {
+        logger.warn('Could not remove role reward from guild config:', err);
+    }
+}
 
 export default {
     data: new SlashCommandBuilder()
@@ -74,16 +99,7 @@ export default {
                     throw new TitanBotError('DB upsert failed', ErrorTypes.DATABASE, 'Failed to save the level role. Please try again.');
                 }
 
-                // Sync to guild config so the XP system picks it up
-                try {
-                    const guildConfig = await getGuildConfig(client, guildId);
-                    if (!guildConfig.leveling) guildConfig.leveling = {};
-                    if (!guildConfig.leveling.roleRewards) guildConfig.leveling.roleRewards = {};
-                    guildConfig.leveling.roleRewards[level] = role.id;
-                    await setGuildConfig(client, guildId, guildConfig);
-                } catch (cfgErr) {
-                    logger.warn('Could not sync role reward to guild config:', cfgErr);
-                }
+                await syncToGuildConfig(client, guildId, { [level]: role.id });
 
                 await InteractionHelper.safeEditReply(interaction, {
                     embeds: [new EmbedBuilder()
@@ -107,16 +123,7 @@ export default {
                     throw new TitanBotError('DB delete failed', ErrorTypes.DATABASE, 'Failed to remove the level role. Please try again.');
                 }
 
-                // Remove from guild config too
-                try {
-                    const guildConfig = await getGuildConfig(client, guildId);
-                    if (guildConfig.leveling && guildConfig.leveling.roleRewards) {
-                        delete guildConfig.leveling.roleRewards[level];
-                        await setGuildConfig(client, guildId, guildConfig);
-                    }
-                } catch (cfgErr) {
-                    logger.warn('Could not remove role reward from guild config:', cfgErr);
-                }
+                await removeFromGuildConfig(client, guildId, level);
 
                 await InteractionHelper.safeEditReply(interaction, {
                     embeds: [new EmbedBuilder()
@@ -184,6 +191,9 @@ export default {
                         logger.error('levelrole setup upsert error:', error);
                         throw new TitanBotError('DB upsert failed', ErrorTypes.DATABASE, 'Failed to save level roles. Please try again.');
                     }
+
+                    const rewardMap = Object.fromEntries(matched.map(({ level, role }) => [level, role.id]));
+                    await syncToGuildConfig(client, guildId, rewardMap);
                 }
 
                 const lines = matched.map(({ level, role }) => `✅ **Level ${level}** → ${role}`);
@@ -202,10 +212,8 @@ export default {
             }
 
             if (sub === 'link') {
-                // Scan ALL roles in the server for any named "Level X"
                 const allRoles = interaction.guild.roles.cache;
                 const levelPattern = /^Level\s+(\d+)$/i;
-
                 const matched    = [];
                 const upsertRows = [];
 
@@ -213,10 +221,8 @@ export default {
                     if (role.managed) continue;
                     const match = role.name.match(levelPattern);
                     if (!match) continue;
-
                     const level = parseInt(match[1], 10);
                     if (level < 1 || level > 1000) continue;
-
                     matched.push({ level, role });
                     upsertRows.push({ guild_id: guildId, level, role_id: role.id });
                 }
@@ -230,10 +236,8 @@ export default {
                     return;
                 }
 
-                // Sort by level for clean display
                 matched.sort((a, b) => a.level - b.level);
 
-                // Save to Supabase
                 const { error } = await supabase
                     .from('level_roles')
                     .upsert(upsertRows, { onConflict: 'guild_id,level' });
@@ -243,23 +247,10 @@ export default {
                     throw new TitanBotError('DB upsert failed', ErrorTypes.DATABASE, 'Failed to save level roles. Please try again.');
                 }
 
-                // Save to guild config so the XP system awards roles on level up
-                try {
-                    const guildConfig = await getGuildConfig(client, guildId);
-                    if (!guildConfig.leveling) guildConfig.leveling = {};
-                    if (!guildConfig.leveling.roleRewards) guildConfig.leveling.roleRewards = {};
-
-                    for (const { level, role } of matched) {
-                        guildConfig.leveling.roleRewards[level] = role.id;
-                    }
-
-                    await setGuildConfig(client, guildId, guildConfig);
-                } catch (cfgErr) {
-                    logger.warn('Could not sync linked roles to guild config:', cfgErr);
-                }
+                const rewardMap = Object.fromEntries(matched.map(({ level, role }) => [level, role.id]));
+                await syncToGuildConfig(client, guildId, rewardMap);
 
                 const lines = matched.map(({ level, role }) => `✅ **Level ${level}** → ${role}`);
-
                 const embed = new EmbedBuilder()
                     .setTitle('Level Roles Linked')
                     .setDescription(lines.join('\n'))
