@@ -30,9 +30,7 @@ export async function addXp(client, guild, member, xpToAdd) {
 
       logger.info(`🎉 ${member.user.tag} leveled up to level ${levelData.level} in ${guild.name}`);
 
-      if (config.roleRewards && config.roleRewards[levelData.level]) {
-        await awardRoleReward(guild, member, config.roleRewards[levelData.level], levelData.level);
-      }
+      await checkAndAwardRoleReward(guild, member, config, levelData.level);
 
       if (config.announceLevelUp) {
         await sendLevelUpAnnouncement(guild, member, levelData, config);
@@ -71,6 +69,31 @@ export async function addXp(client, guild, member, xpToAdd) {
   } catch (error) {
     logger.error('Error adding XP:', error);
     return { success: false, error: error.message };
+  }
+}
+
+async function checkAndAwardRoleReward(guild, member, config, level) {
+  // Try Supabase first (where /levelrole link saves data)
+  try {
+    const { supabase } = await import('../lib/supabase.js');
+    const { data: levelRole } = await supabase
+      .from('level_roles')
+      .select('role_id')
+      .eq('guild_id', guild.id)
+      .eq('level', level)
+      .single();
+
+    if (levelRole?.role_id) {
+      await awardRoleReward(guild, member, levelRole.role_id, level);
+      return;
+    }
+  } catch {
+    // supabase unavailable — fall through to guild config
+  }
+
+  // Fallback: guild config roleRewards
+  if (config.roleRewards && config.roleRewards[level]) {
+    await awardRoleReward(guild, member, config.roleRewards[level], level);
   }
 }
 
