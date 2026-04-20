@@ -9,6 +9,7 @@ import { getColor } from '../../config/bot.js';
 import { logger } from '../../utils/logger.js';
 import { TitanBotError, ErrorTypes } from '../../utils/errorHandler.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
+import { getLevelingConfig, saveLevelingConfig } from '../../services/leveling.js';
 
 export default {
     data: new SlashCommandBuilder()
@@ -20,18 +21,10 @@ export default {
                 .setName('set')
                 .setDescription('Link a role to a level (users get this role when they reach that level)')
                 .addIntegerOption(opt =>
-                    opt
-                        .setName('level')
-                        .setDescription('Level number (1–50)')
-                        .setMinValue(1)
-                        .setMaxValue(50)
-                        .setRequired(true),
+                    opt.setName('level').setDescription('Level number (1–50)').setMinValue(1).setMaxValue(50).setRequired(true),
                 )
                 .addRoleOption(opt =>
-                    opt
-                        .setName('role')
-                        .setDescription('Role to assign when users reach this level')
-                        .setRequired(true),
+                    opt.setName('role').setDescription('Role to assign when users reach this level').setRequired(true),
                 ),
         )
         .addSubcommand(sub =>
@@ -39,34 +32,24 @@ export default {
                 .setName('remove')
                 .setDescription('Remove the role linked to a level')
                 .addIntegerOption(opt =>
-                    opt
-                        .setName('level')
-                        .setDescription('Level number (1–50)')
-                        .setMinValue(1)
-                        .setMaxValue(50)
-                        .setRequired(true),
+                    opt.setName('level').setDescription('Level number (1–50)').setMinValue(1).setMaxValue(50).setRequired(true),
                 ),
         )
         .addSubcommand(sub =>
-            sub
-                .setName('list')
-                .setDescription('Show all level → role mappings configured for this server'),
+            sub.setName('list').setDescription('Show all level → role mappings configured for this server'),
         )
         .addSubcommand(sub =>
-            sub
-                .setName('setup')
-                .setDescription('Auto-detect Level 1, 5, 10, 15, 20, 25, 30, 40, 50 roles and link them all at once'),
+            sub.setName('setup').setDescription('Auto-detect Level 1, 5, 10, 15, 20, 25, 30, 40, 50 roles and link them all at once'),
         ),
 
     async execute(interaction) {
         try {
-            const deferSuccess = await InteractionHelper.safeDefer(interaction, {
-                flags: MessageFlags.Ephemeral,
-            });
+            const deferSuccess = await InteractionHelper.safeDefer(interaction, { flags: MessageFlags.Ephemeral });
             if (!deferSuccess) return;
 
             const sub     = interaction.options.getSubcommand();
             const guildId = interaction.guild.id;
+            const client  = interaction.client;
 
             if (sub === 'set') {
                 const level = interaction.options.getInteger('level');
@@ -74,33 +57,34 @@ export default {
 
                 if (role.managed) {
                     await InteractionHelper.safeEditReply(interaction, {
-                        embeds: [
-                            new EmbedBuilder()
-                                .setDescription('❌ Bot-managed roles cannot be used as level roles.')
-                                .setColor(getColor('error')),
-                        ],
+                        embeds: [new EmbedBuilder().setDescription('❌ Bot-managed roles cannot be used as level roles.').setColor(getColor('error'))],
                     });
                     return;
                 }
 
                 const { error } = await supabase
                     .from('level_roles')
-                    .upsert(
-                        { guild_id: guildId, level, role_id: role.id },
-                        { onConflict: 'guild_id,level' },
-                    );
+                    .upsert({ guild_id: guildId, level, role_id: role.id }, { onConflict: 'guild_id,level' });
 
                 if (error) {
                     logger.error('levelrole set error:', error);
                     throw new TitanBotError('DB upsert failed', ErrorTypes.DATABASE, 'Failed to save the level role. Please try again.');
                 }
 
+                // Also save to guild config so the XP system can read it
+                try {
+                    const config = await getLevelingConfig(client, guildId);
+                    config.roleRewards = config.roleRewards || {};
+                    config.roleRewards[level] = role.id;
+                    await saveLevelingConfig(client, guildId, config);
+                } catch (cfgErr) {
+                    logger.warn('Could not sync role to guild config:', cfgErr);
+                }
+
                 await InteractionHelper.safeEditReply(interaction, {
-                    embeds: [
-                        new EmbedBuilder()
-                            .setDescription(`✅ Users who reach **Level ${level}** will now receive the ${role} role.`)
-                            .setColor(getColor('success')),
-                    ],
+                    embeds: [new EmbedBuilder()
+                        .setDescription(`✅ Users who reach **Level ${level}** will now receive the ${role} role.`)
+                        .setColor(getColor('success'))],
                 });
                 return;
             }
@@ -119,12 +103,21 @@ export default {
                     throw new TitanBotError('DB delete failed', ErrorTypes.DATABASE, 'Failed to remove the level role. Please try again.');
                 }
 
+                // Also remove from guild config
+                try {
+                    const config = await getLevelingConfig(client, guildId);
+                    if (config.roleRewards) {
+                        delete config.roleRewards[level];
+                        await saveLevelingConfig(client, guildId, config);
+                    }
+                } catch (cfgErr) {
+                    logger.warn('Could not sync removal to guild config:', cfgErr);
+                }
+
                 await InteractionHelper.safeEditReply(interaction, {
-                    embeds: [
-                        new EmbedBuilder()
-                            .setDescription(`✅ Removed the role mapping for **Level ${level}**.`)
-                            .setColor(getColor('success')),
-                    ],
+                    embeds: [new EmbedBuilder()
+                        .setDescription(`✅ Removed the role mapping for **Level ${level}**.`)
+                        .setColor(getColor('success'))],
                 });
                 return;
             }
@@ -143,17 +136,14 @@ export default {
 
                 if (!rows || rows.length === 0) {
                     await InteractionHelper.safeEditReply(interaction, {
-                        embeds: [
-                            new EmbedBuilder()
-                                .setDescription('No level roles configured yet.\nUse `/levelrole set` to link a role to a level.')
-                                .setColor(getColor('info')),
-                        ],
+                        embeds: [new EmbedBuilder()
+                            .setDescription('No level roles configured yet.\nUse `/levelrole set` to link a role to a level.')
+                            .setColor(getColor('info'))],
                     });
                     return;
                 }
 
                 const lines = rows.map(r => `**Level ${r.level}** → <@&${r.role_id}>`);
-
                 const embed = new EmbedBuilder()
                     .setTitle('Level Role Rewards')
                     .setDescription(lines.join('\n'))
@@ -161,19 +151,18 @@ export default {
                     .setFooter({ text: `${rows.length} level${rows.length === 1 ? '' : 's'} configured` });
 
                 await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
+                return;
             }
+
             if (sub === 'setup') {
                 const MILESTONE_LEVELS = [1, 5, 10, 15, 20, 25, 30, 40, 50];
-
-                const matched   = [];
-                const missing   = [];
+                const matched    = [];
+                const missing    = [];
                 const upsertRows = [];
 
                 for (const level of MILESTONE_LEVELS) {
                     const roleName = `Level ${level}`;
-                    const role = interaction.guild.roles.cache.find(
-                        r => r.name === roleName && !r.managed,
-                    );
+                    const role = interaction.guild.roles.cache.find(r => r.name === roleName && !r.managed);
                     if (role) {
                         matched.push({ level, role });
                         upsertRows.push({ guild_id: guildId, level, role_id: role.id });
@@ -190,6 +179,18 @@ export default {
                     if (error) {
                         logger.error('levelrole setup upsert error:', error);
                         throw new TitanBotError('DB upsert failed', ErrorTypes.DATABASE, 'Failed to save level roles. Please try again.');
+                    }
+
+                    // Also save all matched roles to guild config
+                    try {
+                        const config = await getLevelingConfig(client, guildId);
+                        config.roleRewards = config.roleRewards || {};
+                        for (const { level, role } of matched) {
+                            config.roleRewards[level] = role.id;
+                        }
+                        await saveLevelingConfig(client, guildId, config);
+                    } catch (cfgErr) {
+                        logger.warn('Could not sync setup roles to guild config:', cfgErr);
                     }
                 }
 
