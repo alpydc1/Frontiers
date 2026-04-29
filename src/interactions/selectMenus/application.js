@@ -1,634 +1,294 @@
 // ============================================================
-// src/commands/Community/application.js
-// Drop this into your repo at that path.
-// Delete the old apply.js and app-admin.js files.
+// src/interactions/selectMenus/application.js
+// Add this file — it handles the role picker in /application apply
 // ============================================================
 
 import {
-    SlashCommandBuilder,
-    PermissionFlagsBits,
-    ActionRowBuilder,
-    ButtonBuilder,
-    ButtonStyle,
-    StringSelectMenuBuilder,
-    StringSelectMenuOptionBuilder,
     ModalBuilder,
+    ActionRowBuilder,
     TextInputBuilder,
     TextInputStyle,
-    ChannelType,
     EmbedBuilder,
+    ButtonBuilder,
+    ButtonStyle,
 } from 'discord.js';
-import { createEmbed, errorEmbed, successEmbed } from '../../utils/embeds.js';
+import { errorEmbed, successEmbed } from '../../utils/embeds.js';
 import { getColor } from '../../config/bot.js';
-import { logger } from '../../utils/logger.js';
-import { withErrorHandling } from '../../utils/errorHandler.js';
-import ApplicationService from '../../services/applicationService.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
+import { logger } from '../../utils/logger.js';
+import ApplicationService from '../../services/applicationService.js';
 import {
-    getApplicationSettings,
     getApplicationRoles,
-    saveApplicationRoles,
-    saveApplicationRoleSettings,
     getApplicationRoleSettings,
-    getApplication,
-    getApplications,
+    getApplicationSettings,
     getUserApplications,
-    deleteApplication,
+    updateApplication,
 } from '../../utils/database.js';
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
+export default [
+    {
+        name: 'app_role_select',
+        execute: async interaction => {
+            const roleId = interaction.values[0];
 
-function statusDisplay(status) {
-    const s = typeof status === 'string' ? status.trim().toLowerCase() : 'unknown';
-    return {
-        label: { pending: 'In Progress', approved: 'Accepted', denied: 'Denied' }[s] ?? 'Unknown',
-        emoji: { pending: '🟡', approved: '🟢', denied: '🔴' }[s] ?? '⚪',
-    };
-}
+            try {
+                // Verify the application role still exists
+                const appRoles = await getApplicationRoles(
+                    interaction.client,
+                    interaction.guild.id,
+                );
+                const appRole = appRoles.find(r => r.roleId === roleId);
 
-// ─── Command Definition ────────────────────────────────────────────────────
-
-export default {
-    data: new SlashCommandBuilder()
-        .setName('application')
-        .setDescription('Role application system')
-        .addSubcommand(sub =>
-            sub
-                .setName('apply')
-                .setDescription('Browse open roles and submit an application'),
-        )
-        .addSubcommand(sub =>
-            sub
-                .setName('status')
-                .setDescription('Check the status of your applications'),
-        )
-        .addSubcommand(sub =>
-            sub
-                .setName('setup')
-                .setDescription('[Admin] Create a new application role'),
-        )
-        .addSubcommand(sub =>
-            sub
-                .setName('list')
-                .setDescription('[Admin] View submitted applications')
-                .addStringOption(opt =>
-                    opt
-                        .setName('status')
-                        .setDescription('Filter by status (default: pending)')
-                        .addChoices(
-                            { name: '🟡 Pending', value: 'pending' },
-                            { name: '🟢 Approved', value: 'approved' },
-                            { name: '🔴 Denied', value: 'denied' },
-                        ),
-                )
-                .addUserOption(opt =>
-                    opt.setName('user').setDescription('Filter by a specific user'),
-                ),
-        )
-        .addSubcommand(sub =>
-            sub
-                .setName('settings')
-                .setDescription('[Admin] View or update application settings')
-                .addChannelOption(opt =>
-                    opt
-                        .setName('log-channel')
-                        .setDescription('Channel where new applications are posted')
-                        .addChannelTypes(ChannelType.GuildText),
-                )
-                .addRoleOption(opt =>
-                    opt
-                        .setName('manager-role')
-                        .setDescription('Role that can review applications'),
-                )
-                .addStringOption(opt =>
-                    opt
-                        .setName('image-url')
-                        .setDescription('Banner image shown on application embeds (HTTPS)'),
-                ),
-        )
-        .addSubcommand(sub =>
-            sub
-                .setName('remove')
-                .setDescription('[Admin] Remove an application role')
-                .addStringOption(opt =>
-                    opt
-                        .setName('name')
-                        .setDescription('Name of the application to remove')
-                        .setRequired(true)
-                        .setAutocomplete(true),
-                ),
-        ),
-
-    category: 'Community',
-
-    execute: withErrorHandling(
-        async interaction => {
-            if (!interaction.inGuild()) {
-                return InteractionHelper.safeReply(interaction, {
-                    embeds: [errorEmbed('This command can only be used in a server.')],
-                    flags: ['Ephemeral'],
-                });
-            }
-
-            const sub = interaction.options.getSubcommand();
-
-            // Only defer for subcommands that don't show modals or select menus immediately
-            if (sub === 'status' || sub === 'list' || sub === 'settings' || sub === 'remove') {
-                await InteractionHelper.safeDefer(interaction, { flags: ['Ephemeral'] });
-            }
-
-            logger.info(`/application ${sub}`, {
-                userId: interaction.user.id,
-                guildId: interaction.guild.id,
-            });
-
-            if (sub === 'apply') return handleApply(interaction);
-            if (sub === 'status') return handleStatus(interaction);
-            if (sub === 'setup') return handleSetup(interaction);
-            if (sub === 'list') return handleList(interaction);
-            if (sub === 'settings') return handleSettings(interaction);
-            if (sub === 'remove') return handleRemove(interaction);
-        },
-        { type: 'command', commandName: 'application' },
-    ),
-};
-
-// ─── /application apply ────────────────────────────────────────────────────
-
-async function handleApply(interaction) {
-    const settings = await getApplicationSettings(interaction.client, interaction.guild.id);
-
-    if (!settings.enabled) {
-        return InteractionHelper.safeReply(interaction, {
-            embeds: [
-                errorEmbed(
-                    'Applications Closed',
-                    'Applications are currently disabled in this server.',
-                ),
-            ],
-            flags: ['Ephemeral'],
-        });
-    }
-
-    const appRoles = await getApplicationRoles(interaction.client, interaction.guild.id);
-    const enabled = appRoles.filter(r => r.enabled !== false);
-
-    if (enabled.length === 0) {
-        return InteractionHelper.safeReply(interaction, {
-            embeds: [
-                errorEmbed(
-                    'No Open Applications',
-                    'There are no open applications right now. Check back later!',
-                ),
-            ],
-            flags: ['Ephemeral'],
-        });
-    }
-
-    // Build the browse embed
-    const embed = new EmbedBuilder()
-        .setTitle('📋 Open Applications')
-        .setDescription(
-            'Select a role below to apply. Fill in the form and your application will be sent to our staff for review.',
-        )
-        .setColor(getColor('primary') || '#5865F2')
-        .setThumbnail(interaction.guild.iconURL({ dynamic: true }))
-        .setFooter({ text: `${interaction.guild.name} • Applications` })
-        .setTimestamp();
-
-    if (settings.imageUrl) embed.setImage(settings.imageUrl);
-
-    enabled.forEach((appRole, i) => {
-        const role = interaction.guild.roles.cache.get(appRole.roleId);
-        embed.addFields({
-            name: `${i + 1}. ${appRole.name}`,
-            value: role ? `<@&${appRole.roleId}>` : '*(role not found)*',
-            inline: true,
-        });
-    });
-
-    const select = new StringSelectMenuBuilder()
-        .setCustomId('app_role_select')
-        .setPlaceholder('Choose a role to apply for...')
-        .addOptions(
-            enabled.map(appRole => {
-                const role = interaction.guild.roles.cache.get(appRole.roleId);
-                return new StringSelectMenuOptionBuilder()
-                    .setLabel(appRole.name)
-                    .setDescription(
-                        role ? `Apply for the ${role.name} role` : 'Apply for this role',
-                    )
-                    .setValue(appRole.roleId);
-            }),
-        );
-
-    return InteractionHelper.safeReply(interaction, {
-        embeds: [embed],
-        components: [new ActionRowBuilder().addComponents(select)],
-        flags: ['Ephemeral'],
-    });
-}
-
-// ─── /application status ───────────────────────────────────────────────────
-
-async function handleStatus(interaction) {
-    const apps = await getUserApplications(
-        interaction.client,
-        interaction.guild.id,
-        interaction.user.id,
-    );
-
-    if (apps.length === 0) {
-        return InteractionHelper.safeEditReply(interaction, {
-            embeds: [
-                errorEmbed(
-                    'No Applications',
-                    "You haven't submitted any applications yet.\nUse `/application apply` to get started!",
-                ),
-            ],
-        });
-    }
-
-    const recent = apps
-        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
-        .slice(0, 10);
-
-    const embed = new EmbedBuilder()
-        .setTitle('📊 Your Applications')
-        .setDescription(`Showing ${recent.length} of your most recent application(s).`)
-        .setColor(getColor('info') || '#5865F2')
-        .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }));
-
-    recent.forEach(app => {
-        const { emoji, label } = statusDisplay(app.status);
-        const date = app.createdAt
-            ? `<t:${Math.floor(new Date(app.createdAt).getTime() / 1000)}:d>`
-            : 'Unknown';
-        embed.addFields({
-            name: `${emoji} ${app.roleName ?? 'Unknown Role'}`,
-            value: `**Status:** ${emoji} ${label}\n**ID:** \`${app.id}\`\n**Submitted:** ${date}`,
-            inline: true,
-        });
-    });
-
-    return InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
-}
-
-// ─── /application setup ────────────────────────────────────────────────────
-
-async function handleSetup(interaction) {
-    if (interaction.deferred || interaction.replied) {
-        return InteractionHelper.safeReply(interaction, {
-            embeds: [errorEmbed('Interaction already processed. Please run the command again.')],
-            flags: ['Ephemeral'],
-        });
-    }
-
-    await ApplicationService.checkManagerPermission(
-        interaction.client,
-        interaction.guild.id,
-        interaction.member,
-    );
-
-    const modal = new ModalBuilder()
-        .setCustomId('app_setup_modal')
-        .setTitle('Create New Application');
-
-    modal.addComponents(
-        new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-                .setCustomId('app_name')
-                .setLabel('Application Name')
-                .setStyle(TextInputStyle.Short)
-                .setPlaceholder('e.g. Moderator, Helper, Trial Staff')
-                .setMaxLength(50)
-                .setRequired(true),
-        ),
-        new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-                .setCustomId('role_id')
-                .setLabel('Role ID')
-                .setStyle(TextInputStyle.Short)
-                .setPlaceholder('Right-click the role → Copy ID')
-                .setMaxLength(20)
-                .setRequired(true),
-        ),
-        new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-                .setCustomId('question_1')
-                .setLabel('Question 1 (required)')
-                .setStyle(TextInputStyle.Short)
-                .setPlaceholder('Why do you want this role?')
-                .setMaxLength(100)
-                .setRequired(true),
-        ),
-        new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-                .setCustomId('question_2')
-                .setLabel('Question 2 (optional)')
-                .setStyle(TextInputStyle.Short)
-                .setPlaceholder('What experience do you have?')
-                .setMaxLength(100)
-                .setRequired(false),
-        ),
-        new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-                .setCustomId('question_3')
-                .setLabel('Question 3 (optional)')
-                .setStyle(TextInputStyle.Short)
-                .setMaxLength(100)
-                .setRequired(false),
-        ),
-    );
-
-    await interaction.showModal(modal);
-
-    try {
-        const submitted = await interaction.awaitModalSubmit({
-            time: 15 * 60 * 1000,
-            filter: i =>
-                i.customId === 'app_setup_modal' && i.user.id === interaction.user.id,
-        });
-
-        const appName = submitted.fields.getTextInputValue('app_name').trim();
-        const roleId = submitted.fields.getTextInputValue('role_id').trim();
-        const questions = [
-            submitted.fields.getTextInputValue('question_1').trim(),
-            submitted.fields.getTextInputValue('question_2').trim(),
-            submitted.fields.getTextInputValue('question_3').trim(),
-        ].filter(q => q.length > 0);
-
-        // Validate role exists
-        let role;
-        try {
-            role = await interaction.guild.roles.fetch(roleId);
-        } catch {
-            return submitted.reply({
-                embeds: [
-                    errorEmbed(
-                        'Role Not Found',
-                        'No role exists with that ID. Make sure Developer Mode is on and you copied the Role ID correctly.',
-                    ),
-                ],
-                flags: ['Ephemeral'],
-            });
-        }
-
-        // Check for duplicates
-        const existing = await getApplicationRoles(interaction.client, interaction.guild.id);
-        if (existing.some(r => r.roleId === roleId)) {
-            return submitted.reply({
-                embeds: [
-                    errorEmbed(
-                        'Already Configured',
-                        `${role} is already set up as an application. Use \`/application settings\` to manage it.`,
-                    ),
-                ],
-                flags: ['Ephemeral'],
-            });
-        }
-
-        // Save
-        existing.push({ roleId, name: appName, enabled: true });
-        await saveApplicationRoles(interaction.client, interaction.guild.id, existing);
-        await saveApplicationRoleSettings(interaction.client, interaction.guild.id, roleId, {
-            questions,
-        });
-
-        // Auto-enable the system
-        const currentSettings = await getApplicationSettings(
-            interaction.client,
-            interaction.guild.id,
-        );
-        if (!currentSettings.enabled) {
-            await ApplicationService.updateSettings(
-                interaction.client,
-                interaction.guild.id,
-                { enabled: true },
-            );
-        }
-
-        const embed = new EmbedBuilder()
-            .setTitle('✅ Application Created')
-            .setDescription(
-                `**${appName}** is now live for ${role}.\n\n` +
-                    `**Questions (${questions.length}):**\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n')}\n\n` +
-                    `💡 Set a log channel with \`/application settings log-channel:#channel\` so applications show up for review.`,
-            )
-            .setColor(getColor('success') || '#57F287')
-            .setThumbnail(interaction.guild.iconURL({ dynamic: true }));
-
-        await submitted.reply({ embeds: [embed], flags: ['Ephemeral'] });
-    } catch (err) {
-        if (err.message?.includes('time')) return;
-        throw err;
-    }
-}
-
-// ─── /application list ─────────────────────────────────────────────────────
-
-async function handleList(interaction) {
-    await ApplicationService.checkManagerPermission(
-        interaction.client,
-        interaction.guild.id,
-        interaction.member,
-    );
-
-    const statusFilter = interaction.options.getString('status') || 'pending';
-    const userFilter = interaction.options.getUser('user');
-
-    let apps = await getApplications(interaction.client, interaction.guild.id, {
-        status: statusFilter,
-    });
-
-    if (userFilter) apps = apps.filter(a => a.userId === userFilter.id);
-
-    // Clean up applications from users who left
-    if (!userFilter) {
-        const settled = await Promise.all(
-            apps.map(async app => {
-                try {
-                    await interaction.guild.members.fetch(app.userId);
-                    return app;
-                } catch {
-                    await deleteApplication(
-                        interaction.client,
-                        interaction.guild.id,
-                        app.id,
-                        app.userId,
-                    );
-                    return null;
+                if (!appRole || appRole.enabled === false) {
+                    return interaction.reply({
+                        embeds: [
+                            errorEmbed(
+                                'Application Unavailable',
+                                'This application is no longer available.',
+                            ),
+                        ],
+                        flags: ['Ephemeral'],
+                    });
                 }
-            }),
-        );
-        apps = settled.filter(Boolean);
-    }
 
-    apps = apps
-        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
-        .slice(0, 15);
+                // Block if user has a pending application
+                const userApps = await getUserApplications(
+                    interaction.client,
+                    interaction.guild.id,
+                    interaction.user.id,
+                );
+                const pending = userApps.find(a => a.status === 'pending');
 
-    if (apps.length === 0) {
-        return InteractionHelper.safeEditReply(interaction, {
-            embeds: [
-                errorEmbed(
-                    'Nothing Found',
-                    `No ${statusFilter} applications found${userFilter ? ` for ${userFilter}` : ''}.`,
-                ),
-            ],
-        });
-    }
+                if (pending) {
+                    return interaction.reply({
+                        embeds: [
+                            errorEmbed(
+                                'Application Pending',
+                                `You already have a pending application.\nPlease wait for it to be reviewed before applying again.\n\nApplication ID: \`${pending.id}\``,
+                            ),
+                        ],
+                        flags: ['Ephemeral'],
+                    });
+                }
 
-    const { emoji: hEmoji, label: hLabel } = statusDisplay(statusFilter);
+                // Load questions
+                const settings = await getApplicationSettings(
+                    interaction.client,
+                    interaction.guild.id,
+                );
+                const roleSettings = await getApplicationRoleSettings(
+                    interaction.client,
+                    interaction.guild.id,
+                    roleId,
+                );
 
-    const embed = new EmbedBuilder()
-        .setTitle(`${hEmoji} ${hLabel} Applications`)
-        .setDescription(`Showing ${apps.length} result(s).`)
-        .setColor(getColor('info') || '#5865F2');
+                const questions = (
+                    roleSettings.questions?.length ? roleSettings.questions : null
+                ) ??
+                    settings.questions ?? [
+                        'Why do you want this role?',
+                        'What experience do you have?',
+                    ];
 
-    apps.forEach(app => {
-        const { emoji, label } = statusDisplay(app.status);
-        const date = app.createdAt
-            ? `<t:${Math.floor(new Date(app.createdAt).getTime() / 1000)}:d>`
-            : 'Unknown';
-        embed.addFields({
-            name: `${emoji} ${app.roleName ?? 'Unknown'} — ${app.username ?? 'Unknown User'}`,
-            value: `**ID:** \`${app.id}\`\n**Status:** ${label}\n**Submitted:** ${date}`,
-            inline: true,
-        });
-    });
+                const limited = questions.slice(0, 5); // Discord max: 5 modal components
 
-    embed.setFooter({
-        text: 'Staff can approve/deny directly from the log channel buttons.',
-    });
+                // Build and show the application modal
+                const modal = new ModalBuilder()
+                    .setCustomId(`app_submit:${roleId}`)
+                    .setTitle(`Apply for ${appRole.name}`);
 
-    return InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
-}
+                limited.forEach((q, i) => {
+                    modal.addComponents(
+                        new ActionRowBuilder().addComponents(
+                            new TextInputBuilder()
+                                .setCustomId(`q${i}`)
+                                .setLabel(q.length > 45 ? `${q.substring(0, 42)}...` : q)
+                                .setStyle(TextInputStyle.Paragraph)
+                                .setRequired(true)
+                                .setMinLength(10)
+                                .setMaxLength(1000),
+                        ),
+                    );
+                });
 
-// ─── /application settings ─────────────────────────────────────────────────
+                await interaction.showModal(modal);
 
-async function handleSettings(interaction) {
-    await ApplicationService.checkManagerPermission(
-        interaction.client,
-        interaction.guild.id,
-        interaction.member,
-    );
+                // ── Wait for modal submission inline ──────────────────────
+                let submitted;
+                try {
+                    submitted = await interaction.awaitModalSubmit({
+                        time: 10 * 60 * 1000,
+                        filter: i =>
+                            i.customId === `app_submit:${roleId}` &&
+                            i.user.id === interaction.user.id,
+                    });
+                } catch {
+                    return; // Timed out — user closed the modal
+                }
 
-    const logChannel = interaction.options.getChannel('log-channel');
-    const managerRole = interaction.options.getRole('manager-role');
-    const imageUrl = interaction.options.getString('image-url');
+                await submitted.deferReply({ flags: ['Ephemeral'] });
 
-    const updates = {};
-    const lines = [];
+                // Verify role still in guild
+                const role = interaction.guild.roles.cache.get(roleId);
+                if (!role) {
+                    return submitted.editReply({
+                        embeds: [
+                            errorEmbed(
+                                'Role Gone',
+                                'The role for this application no longer exists. Contact an admin.',
+                            ),
+                        ],
+                    });
+                }
 
-    if (logChannel) {
-        updates.logChannelId = logChannel.id;
-        lines.push(`📌 Log channel set to ${logChannel}`);
-    }
-    if (managerRole) {
-        const current = await getApplicationSettings(interaction.client, interaction.guild.id);
-        const roles = Array.isArray(current.managerRoles) ? [...current.managerRoles] : [];
-        if (!roles.includes(managerRole.id)) roles.push(managerRole.id);
-        updates.managerRoles = roles;
-        lines.push(`👤 Manager role added: ${managerRole}`);
-    }
-    if (imageUrl) {
-        if (!imageUrl.startsWith('https://')) {
-            return InteractionHelper.safeEditReply(interaction, {
-                embeds: [errorEmbed('Image URL must start with `https://`.')],
-            });
-        }
-        updates.imageUrl = imageUrl;
-        lines.push(`🖼️ Banner image updated`);
-    }
+                // Collect answers
+                const answers = limited.map((question, i) => ({
+                    question,
+                    answer: submitted.fields.getTextInputValue(`q${i}`) ?? '',
+                }));
 
-    // No options provided → show current settings
-    if (lines.length === 0) {
-        const s = await getApplicationSettings(interaction.client, interaction.guild.id);
-        const roles = await getApplicationRoles(interaction.client, interaction.guild.id);
+                // Submit via service (validates, cooldown check, saves to DB)
+                const application = await ApplicationService.submitApplication(
+                    interaction.client,
+                    {
+                        guildId: interaction.guild.id,
+                        userId: interaction.user.id,
+                        roleId,
+                        roleName: appRole.name,
+                        username: interaction.user.tag,
+                        avatar: interaction.user.displayAvatarURL(),
+                        answers,
+                    },
+                );
 
-        const embed = new EmbedBuilder()
-            .setTitle('⚙️ Application Settings')
-            .setColor(getColor('info') || '#5865F2')
-            .addFields(
-                {
-                    name: 'Status',
-                    value: s.enabled ? '✅ Enabled' : '❌ Disabled',
-                    inline: true,
-                },
-                {
-                    name: 'Log Channel',
-                    value: s.logChannelId ? `<#${s.logChannelId}>` : 'Not set',
-                    inline: true,
-                },
-                {
-                    name: 'Manager Roles',
-                    value:
-                        s.managerRoles?.length > 0
-                            ? s.managerRoles.map(r => `<@&${r}>`).join(', ')
-                            : 'None (uses Manage Server)',
-                    inline: true,
-                },
-                {
-                    name: 'Banner Image',
-                    value: s.imageUrl ? `[Preview](${s.imageUrl})` : 'Not set',
-                    inline: true,
-                },
-                {
-                    name: `Applications (${roles.length})`,
-                    value:
-                        roles.length > 0
-                            ? roles
-                                  .map(r => `• **${r.name}** — ${r.enabled !== false ? '✅ Open' : '❌ Closed'}`)
-                                  .join('\n')
-                            : 'None yet — use `/application setup` to create one.',
-                    inline: false,
-                },
-            );
+                // ── Confirm to the applicant ───────────────────────────────
+                await submitted.editReply({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setTitle('✅ Application Submitted!')
+                            .setDescription(
+                                `Your application for **${appRole.name}** has been received and is under review.\n\n` +
+                                    `**Application ID:** \`${application.id}\`\n` +
+                                    `Check your status anytime with \`/application status\``,
+                            )
+                            .setColor(getColor('success') || '#57F287')
+                            .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
+                            .setTimestamp(),
+                    ],
+                });
 
-        return InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
-    }
+                // ── Post to log channel ────────────────────────────────────
+                const logChannelId =
+                    roleSettings.logChannelId || settings.logChannelId;
+                if (!logChannelId) return;
 
-    await ApplicationService.updateSettings(interaction.client, interaction.guild.id, updates);
+                const logChannel =
+                    interaction.guild.channels.cache.get(logChannelId);
+                if (!logChannel) return;
 
-    return InteractionHelper.safeEditReply(interaction, {
-        embeds: [
-            new EmbedBuilder()
-                .setTitle('✅ Settings Updated')
-                .setDescription(lines.join('\n'))
-                .setColor(getColor('success') || '#57F287'),
-        ],
-    });
-}
+                const logEmbed = new EmbedBuilder()
+                    .setTitle('📝 New Application')
+                    .setColor(getColor('warning') || '#FEE75C')
+                    .setAuthor({
+                        name: `${interaction.user.tag}`,
+                        iconURL: interaction.user.displayAvatarURL({ dynamic: true }),
+                    })
+                    .addFields(
+                        {
+                            name: '👤 Applicant',
+                            value: `<@${interaction.user.id}>`,
+                            inline: true,
+                        },
+                        {
+                            name: '📋 Application',
+                            value: appRole.name,
+                            inline: true,
+                        },
+                        {
+                            name: '🎭 Role',
+                            value: `<@&${roleId}>`,
+                            inline: true,
+                        },
+                        {
+                            name: '🆔 Application ID',
+                            value: `\`${application.id}\``,
+                            inline: true,
+                        },
+                        {
+                            name: '📊 Status',
+                            value: '🟡 Pending Review',
+                            inline: true,
+                        },
+                        {
+                            name: '📅 Submitted',
+                            value: `<t:${Math.floor(Date.now() / 1000)}:R>`,
+                            inline: true,
+                        },
+                    )
+                    .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
+                    .setTimestamp()
+                    .setFooter({ text: 'Use the buttons below to review this application' });
 
-// ─── /application remove ───────────────────────────────────────────────────
+                if (settings.imageUrl) logEmbed.setImage(settings.imageUrl);
 
-async function handleRemove(interaction) {
-    await ApplicationService.checkManagerPermission(
-        interaction.client,
-        interaction.guild.id,
-        interaction.member,
-    );
+                // Add Q&A fields
+                answers.forEach((item, i) => {
+                    logEmbed.addFields({
+                        name: `❓ Q${i + 1}: ${item.question}`,
+                        value: item.answer.trim() || '*No answer provided*',
+                        inline: false,
+                    });
+                });
 
-    const name = interaction.options.getString('name');
-    const existing = await getApplicationRoles(interaction.client, interaction.guild.id);
-    const idx = existing.findIndex(r => r.name.toLowerCase() === name.toLowerCase());
+                // Approve / Deny buttons — IDs use : delimiter for handler routing
+                const buttons = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`app_approve:${application.id}`)
+                        .setLabel('Approve')
+                        .setEmoji('✅')
+                        .setStyle(ButtonStyle.Success),
+                    new ButtonBuilder()
+                        .setCustomId(`app_deny:${application.id}`)
+                        .setLabel('Deny')
+                        .setEmoji('❌')
+                        .setStyle(ButtonStyle.Danger),
+                );
 
-    if (idx === -1) {
-        return InteractionHelper.safeEditReply(interaction, {
-            embeds: [errorEmbed(`No application named **${name}** was found.`)],
-        });
-    }
+                const logMsg = await logChannel.send({
+                    embeds: [logEmbed],
+                    components: [buttons],
+                });
 
-    const [removed] = existing.splice(idx, 1);
-    await saveApplicationRoles(interaction.client, interaction.guild.id, existing);
+                // Save log message reference for later updates
+                await updateApplication(
+                    interaction.client,
+                    interaction.guild.id,
+                    application.id,
+                    { logMessageId: logMsg.id, logChannelId },
+                );
+            } catch (error) {
+                logger.error('Error in app_role_select handler', {
+                    error: error.message,
+                    userId: interaction.user.id,
+                    guildId: interaction.guild.id,
+                    stack: error.stack,
+                });
 
-    return InteractionHelper.safeEditReply(interaction, {
-        embeds: [
-            new EmbedBuilder()
-                .setTitle('🗑️ Application Removed')
-                .setDescription(`The **${removed.name}** application has been removed.`)
-                .setColor(getColor('warning') || '#FEE75C'),
-        ],
-    });
-}
+                // Best-effort error reply
+                const errEmbed = errorEmbed(
+                    'Something went wrong',
+                    'An error occurred while processing your application. Please try again.',
+                );
+                try {
+                    if (interaction.replied || interaction.deferred) {
+                        await interaction.followUp({ embeds: [errEmbed], flags: ['Ephemeral'] });
+                    } else {
+                        await interaction.reply({ embeds: [errEmbed], flags: ['Ephemeral'] });
+                    }
+                } catch {
+                    // interaction already handled
+                }
+            }
+        },
+    },
+];
