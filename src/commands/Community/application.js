@@ -131,7 +131,19 @@ export async function buildConfigPanel(client, guild, roleId) {
     return { embed, selectRow: new ActionRowBuilder().addComponents(selectMenu) };
 }
 
-// ─── Command Definition ────────────────────────────────────────────────────
+// ─── Default questions ─────────────────────────────────────────────────────
+
+const DEFAULT_QUESTIONS = [
+    'What is your Roblox and Discord username?',
+    'Why do you want to join that section of staff?',
+    'Give me 3 reasons why you would be better than the other candidates?',
+    'Are you over the age of 13? If so, state your Age Group.',
+    'What is your timezone?',
+    'Any previous experience in moderation?',
+    'How many hours can you dedicate towards the group?',
+    'How would you handle someone breaking the rules in the server?',
+    'Will you be able to join VCs whenever needed?',
+];
 
 export default {
     data: new SlashCommandBuilder()
@@ -255,9 +267,13 @@ async function handleApply(interaction) {
 
     const embed = new EmbedBuilder()
         .setTitle('📋 Open Applications')
-        .setColor(getColor('primary') || '#5865F2')
+        .setColor('#5865F2')
         .setThumbnail(interaction.guild.iconURL({ dynamic: true }))
-        .setFooter({ text: `${interaction.guild.name} • Select a role below to apply` })
+        .setDescription(
+            `Welcome to **${interaction.guild.name}**'s application system!\n` +
+            `Browse the open roles below and select one to begin your application.\n\u200B`,
+        )
+        .setFooter({ text: `${interaction.guild.name} • Select a role below to start applying` })
         .setTimestamp();
 
     if (settings.imageUrl) embed.setImage(settings.imageUrl);
@@ -269,13 +285,14 @@ async function handleApply(interaction) {
         const questionCount = roleSettings.questions?.length ?? 2;
 
         embed.addFields({
-            name: appRole.name,
+            name: `${appRole.name}`,
             value: [
                 role ? `<@&${appRole.roleId}>` : '*(role not found)*',
                 roleSettings.description ? `\n*${roleSettings.description}*` : '',
-                `\n📝 ${questionCount} question${questionCount !== 1 ? 's' : ''}`,
+                `\n📝 **${questionCount}** question${questionCount !== 1 ? 's' : ''} (answered in steps)`,
                 roleSettings.requiredRoles?.length ? `\n✅ Requires specific roles` : '',
-                roleSettings.minAccountAgeDays ? `\n📅 Min. account age: ${roleSettings.minAccountAgeDays}d` : '',
+                roleSettings.minAccountAgeDays ? `\n📅 Min. account age: **${roleSettings.minAccountAgeDays}** days` : '',
+                roleSettings.cooldownDays ? `\n⏰ Cooldown: **${roleSettings.cooldownDays}** days after denial` : '',
             ].join(''),
             inline: true,
         });
@@ -512,7 +529,13 @@ async function handleSetup(interaction) {
 
     existing.push({ roleId, name: appName, enabled: true });
     await saveApplicationRoles(interaction.client, interaction.guild.id, existing);
-    await saveApplicationRoleSettings(interaction.client, interaction.guild.id, roleId, { questions });
+
+    // Pre-load default questions — any from the setup modal override them
+    const finalQuestions = questions.length > 0
+        ? [...questions, ...DEFAULT_QUESTIONS.slice(questions.length)]
+        : DEFAULT_QUESTIONS;
+
+    await saveApplicationRoleSettings(interaction.client, interaction.guild.id, roleId, { questions: finalQuestions });
 
     const currentSettings = await getApplicationSettings(interaction.client, interaction.guild.id);
     if (!currentSettings.enabled) {
@@ -521,13 +544,25 @@ async function handleSetup(interaction) {
 
     const embed = new EmbedBuilder()
         .setTitle('✅ Application Created')
+        .setColor('#57F287')
+        .setThumbnail(interaction.guild.iconURL({ dynamic: true }))
         .setDescription(
-            `**${appName}** is now accepting applications for ${role}.\n\n` +
-            `**Questions (${questions.length}):**\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n')}\n\n` +
-            `💡 Use \`/application configure name:${appName}\` to set a log channel, requirements, banner, and more.`,
+            `**${appName}** is now open and accepting applications for ${role}.\n\n` +
+            `📋 **${finalQuestions.length} questions** pre-loaded — members will answer them in two steps.\n\n` +
+            `💡 **Next steps:**\n` +
+            `> • Set a log channel: \`/application configure name:${appName}\`\n` +
+            `> • Set a staff ping role, banner, eligibility rules, and more from the same command.`,
         )
-        .setColor(getColor('success') || '#57F287')
-        .setThumbnail(interaction.guild.iconURL({ dynamic: true }));
+        .addFields(
+            {
+                name: '📝 Questions Preview',
+                value: finalQuestions.slice(0, 5).map((q, i) => `**${i + 1}.** ${q}`).join('\n') +
+                    (finalQuestions.length > 5 ? `\n*...and ${finalQuestions.length - 5} more*` : ''),
+                inline: false,
+            },
+        )
+        .setFooter({ text: `${interaction.guild.name} • Application System` })
+        .setTimestamp();
 
     await submitted.reply({ embeds: [embed], flags: ['Ephemeral'] });
 }
