@@ -124,24 +124,24 @@ export default {
               const { getAllReactionRoleMessages, deleteReactionRoleMessage } = await import('../services/reactionRoleService.js');
               const guildId = interaction.guildId;
               const guild = interaction.guild;
-              
+
               let panels = await getAllReactionRoleMessages(client, guildId);
-              
+
               if (!panels || panels.length === 0) {
                 await interaction.respond([]);
                 return;
               }
-              
+
               const validPanels = [];
               for (const panel of panels) {
                 if (!panel.messageId || !panel.channelId) continue;
-                
+
                 const channel = guild.channels.cache.get(panel.channelId);
                 if (!channel) {
                   await deleteReactionRoleMessage(client, guildId, panel.messageId).catch(() => {});
                   continue;
                 }
-                
+
                 const msg = await channel.messages.fetch(panel.messageId).catch(() => null);
                 if (!msg) {
                   await deleteReactionRoleMessage(client, guildId, panel.messageId).catch(() => {});
@@ -149,24 +149,24 @@ export default {
                 }
                 validPanels.push(panel);
               }
-              
+
               if (validPanels.length === 0) {
                 await interaction.respond([]);
                 return;
               }
-              
+
               const choices = await Promise.all(
                 validPanels.slice(0, 25).map(async panel => {
                   try {
                     const channel = guild.channels.cache.get(panel.channelId);
                     if (!channel) return null;
-                    
+
                     const msg = await channel.messages.fetch(panel.messageId).catch(() => null);
                     if (!msg) return null;
-                    
+
                     const title = msg?.embeds?.[0]?.title ?? 'Untitled Panel';
                     const channelName = channel?.name ?? 'unknown';
-                    
+
                     return {
                       name: `${title} (${channelName})`.substring(0, 100),
                       value: panel.messageId
@@ -176,7 +176,7 @@ export default {
                   }
                 })
               );
-              
+
               const validChoices = choices.filter(c => c !== null);
               await interaction.respond(validChoices);
             } catch (error) {
