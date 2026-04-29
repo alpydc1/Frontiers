@@ -11,53 +11,7 @@ import { enforceAbuseProtection, formatCooldownDuration } from '../utils/abusePr
 function withTraceContext(context = {}, traceContext = {}) {
   return {
     traceId: traceContext.traceId,
-    guildId: context.guildId || traceContext.guildId,# interactionCreate.js — Autocomplete Patch
-
-In `src/events/interactionCreate.js`, find the autocomplete section and replace:
-
-```javascript
-if (interaction.commandName === 'apply' && focusedOption.name === 'application') {
-    // ... (the whole apply block)
-} else if (interaction.commandName === 'app-admin' && focusedOption.name === 'application') {
-    // ... (the whole app-admin block)
-}
-```
-
-Replace the ENTIRE block above with this:
-
-```javascript
-if (interaction.commandName === 'application') {
-    try {
-        const { getApplicationRoles } = await import('../utils/database.js');
-        const roles = await getApplicationRoles(client, interaction.guildId);
-        const typed = interaction.options.getFocused()?.toLowerCase() || '';
-
-        // /application apply  → autocomplete is on the select menu, not here
-        // /application remove → autocomplete the 'name' option (show all roles for admins)
-        const filtered = roles.filter(role =>
-            role.name.toLowerCase().startsWith(typed),
-        );
-
-        await interaction.respond(
-            filtered.slice(0, 25).map(role => ({
-                name: `${role.name}${role.enabled === false ? ' (closed)' : ''}`,
-                value: role.name,
-            })),
-        );
-    } catch (error) {
-        logger.error('Error handling application autocomplete:', {
-            error: error.message,
-            guildId: interaction.guildId,
-        });
-        await interaction.respond([]);
-    }
-}
-```
-
----
-
-That's the only change needed in interactionCreate.js.
-
+    guildId: context.guildId || traceContext.guildId,
     userId: context.userId || traceContext.userId,
     command: context.commandName || traceContext.command,
     ...context
@@ -140,6 +94,7 @@ export default {
             }, interactionTraceContext));
           }
         } else if (interaction.isAutocomplete()) {
+          // Handle autocomplete interactions
           const focusedOption = interaction.options.getFocused(true);
 
           if (interaction.commandName === 'application') {
@@ -178,9 +133,12 @@ export default {
                 return;
               }
 
+              // Filter out panels whose messages no longer exist
               const validPanels = [];
               for (const panel of panels) {
-                if (!panel.messageId || !panel.channelId) continue;
+                if (!panel.messageId || !panel.channelId) {
+                  continue;
+                }
 
                 const channel = guild.channels.cache.get(panel.channelId);
                 if (!channel) {
@@ -293,6 +251,9 @@ export default {
 
           if (!selectMenu) {
             if (!interaction.customId.includes(':')) {
+              // No registered handler and no ':' delimiter — this is an inline-collected
+              // select menu (e.g. ticket_config_<guildId>, jointocreate_config_<id>).
+              // Return silently so the existing MessageComponentCollector handles it.
               return;
             }
 
@@ -326,6 +287,8 @@ export default {
 
           if (!modal) {
             if (!interaction.customId.includes(':')) {
+              // No registered handler and no ':' delimiter — this is an inline-awaited
+              // modal (e.g. via awaitModalSubmit). Return silently so the caller handles it.
               return;
             }
 
