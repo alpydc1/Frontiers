@@ -93,7 +93,7 @@ async function handleReview(interaction, isApprove) {
 
     // Show reason modal
     const action = isApprove ? 'Approve' : 'Deny';
-    const modalId = `app_reason_modal:${appId}:${isApprove ? '1' : '0'}`;
+    const modalId = `appreason_${appId}_${isApprove ? '1' : '0'}`;
 
     const modal = new ModalBuilder()
         .setCustomId(modalId)
@@ -380,7 +380,7 @@ async function handleNote(interaction) {
     if (!app) return;
 
     // Show note modal
-    const modalId = `app_note_modal:${appId}`;
+    const modalId = `appnote_${appId}`;
 
     const modal = new ModalBuilder()
         .setCustomId(modalId)
