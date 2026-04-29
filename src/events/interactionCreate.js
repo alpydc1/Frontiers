@@ -1,8 +1,6 @@
 import { Events, MessageFlags } from 'discord.js';
 import { logger } from '../utils/logger.js';
 import { getGuildConfig } from '../services/guildConfig.js';
-import { handleApplicationModal } from '../commands/Community/apply.js';
-import { handleApplicationReviewModal } from '../commands/Community/app-admin.js';
 import { handleInteractionError, createError, ErrorTypes } from '../utils/errorHandler.js';
 import { MessageTemplates } from '../utils/messageTemplates.js';
 import { InteractionHelper } from '../utils/interactionHelper.js';
@@ -96,57 +94,28 @@ export default {
             }, interactionTraceContext));
           }
         } else if (interaction.isAutocomplete()) {
-          // Handle autocomplete interactions
           const focusedOption = interaction.options.getFocused(true);
-          
-          if (interaction.commandName === 'apply' && focusedOption.name === 'application') {
+
+          if (interaction.commandName === 'application') {
             try {
               const { getApplicationRoles } = await import('../utils/database.js');
               const roles = await getApplicationRoles(client, interaction.guildId);
-              const roleName = interaction.options.getString('application', false);
-              
-              // Filter: only show enabled applications
+              const typed = interaction.options.getFocused()?.toLowerCase() || '';
+
               const filtered = roles.filter(role =>
-                role.enabled !== false && 
-                role.name.toLowerCase().startsWith(roleName?.toLowerCase() || '')
+                role.name.toLowerCase().startsWith(typed),
               );
-              
+
               await interaction.respond(
                 filtered.slice(0, 25).map(role => ({
-                  name: `${role.name}${role.enabled === false ? ' (disabled)' : ''}`,
-                  value: role.name
-                }))
+                  name: `${role.name}${role.enabled === false ? ' (closed)' : ''}`,
+                  value: role.name,
+                })),
               );
             } catch (error) {
-              logger.error('Error handling autocomplete:', {
+              logger.error('Error handling application autocomplete:', {
                 error: error.message,
                 guildId: interaction.guildId,
-                commandName: interaction.commandName
-              });
-              await interaction.respond([]);
-            }
-          } else if (interaction.commandName === 'app-admin' && focusedOption.name === 'application') {
-            try {
-              const { getApplicationRoles } = await import('../utils/database.js');
-              const roles = await getApplicationRoles(client, interaction.guildId);
-              const appName = interaction.options.getString('application', false);
-              
-              // Show all applications (enabled and disabled), but mark disabled ones
-              const filtered = roles.filter(role =>
-                role.name.toLowerCase().startsWith(appName?.toLowerCase() || '')
-              );
-              
-              await interaction.respond(
-                filtered.slice(0, 25).map(role => ({
-                  name: `${role.name}${role.enabled === false ? ' (disabled)' : ''}`,
-                  value: role.name
-                }))
-              );
-            } catch (error) {
-              logger.error('Error handling app-admin autocomplete:', {
-                error: error.message,
-                guildId: interaction.guildId,
-                commandName: interaction.commandName
               });
               await interaction.respond([]);
             }
@@ -163,12 +132,9 @@ export default {
                 return;
               }
               
-              // Filter out panels whose messages no longer exist
               const validPanels = [];
               for (const panel of panels) {
-                if (!panel.messageId || !panel.channelId) {
-                  continue;
-                }
+                if (!panel.messageId || !panel.channelId) continue;
                 
                 const channel = guild.channels.cache.get(panel.channelId);
                 if (!channel) {
@@ -281,9 +247,6 @@ export default {
 
           if (!selectMenu) {
             if (!interaction.customId.includes(':')) {
-              // No registered handler and no ':' delimiter — this is an inline-collected
-              // select menu (e.g. ticket_config_<guildId>, jointocreate_config_<id>).
-              // Return silently so the existing MessageComponentCollector handles it.
               return;
             }
 
@@ -304,32 +267,6 @@ export default {
             }, interactionTraceContext));
           }
         } else if (interaction.isModalSubmit()) {
-          if (interaction.customId.startsWith('app_modal_')) {
-            try {
-              await handleApplicationModal(interaction);
-            } catch (error) {
-              await handleInteractionError(interaction, error, withTraceContext({
-                type: 'modal',
-                customId: interaction.customId,
-                handler: 'application'
-              }, interactionTraceContext));
-            }
-            return;
-          }
-
-          if (interaction.customId.startsWith('app_review_')) {
-            try {
-              await handleApplicationReviewModal(interaction);
-            } catch (error) {
-              await handleInteractionError(interaction, error, withTraceContext({
-                type: 'modal',
-                customId: interaction.customId,
-                handler: 'application_review'
-              }, interactionTraceContext));
-            }
-            return;
-          }
-
           if (interaction.customId.startsWith('jtc_')) {
             logger.debug(`Skipping modal handler lookup for inline-awaited modal: ${interaction.customId}`, {
               event: 'interaction.modal.inline_skipped',
@@ -343,8 +280,6 @@ export default {
 
           if (!modal) {
             if (!interaction.customId.includes(':')) {
-              // No registered handler and no ':' delimiter — this is an inline-awaited
-              // modal (e.g. via awaitModalSubmit). Return silently so the caller handles it.
               return;
             }
 
