@@ -149,11 +149,9 @@ export default {
     data: new SlashCommandBuilder()
         .setName('application')
         .setDescription('Role application system')
-        // ── Member commands ──────────────────────────────────────────────
         .addSubcommand(s => s.setName('apply').setDescription('Browse open roles and submit an application'))
         .addSubcommand(s => s.setName('status').setDescription('Check the status of your applications'))
         .addSubcommand(s => s.setName('cancel').setDescription('Cancel one of your pending applications'))
-        // ── Admin commands ───────────────────────────────────────────────
         .addSubcommand(s => s.setName('setup').setDescription('[Admin] Create a new application role'))
         .addSubcommand(s =>
             s.setName('configure')
@@ -220,7 +218,6 @@ export default {
         const sub = interaction.options.getSubcommand();
 
         try {
-            // setup shows a modal (can't defer first)
             if (sub !== 'setup') {
                 await InteractionHelper.safeDefer(interaction, { flags: ['Ephemeral'] });
             }
@@ -244,8 +241,6 @@ export default {
         }
     },
 };
-
-// ─── /application apply ────────────────────────────────────────────────────
 
 async function handleApply(interaction) {
     const settings = await getApplicationSettings(interaction.client, interaction.guild.id);
@@ -278,14 +273,13 @@ async function handleApply(interaction) {
 
     if (settings.imageUrl) embed.setImage(settings.imageUrl);
 
-    // Build role fields with descriptions
     for (const appRole of enabled) {
         const role = interaction.guild.roles.cache.get(appRole.roleId);
         const roleSettings = await getApplicationRoleSettings(interaction.client, interaction.guild.id, appRole.roleId);
         const questionCount = roleSettings.questions?.length ?? 2;
 
         embed.addFields({
-            name: `${appRole.name}`,
+            name: appRole.name,
             value: [
                 role ? `<@&${appRole.roleId}>` : '*(role not found)*',
                 roleSettings.description ? `\n*${roleSettings.description}*` : '',
@@ -317,8 +311,6 @@ async function handleApply(interaction) {
     });
 }
 
-// ─── /application status ───────────────────────────────────────────────────
-
 async function handleStatus(interaction) {
     const apps = await getUserApplications(interaction.client, interaction.guild.id, interaction.user.id);
 
@@ -332,7 +324,7 @@ async function handleStatus(interaction) {
 
     const embed = new EmbedBuilder()
         .setTitle('📊 Your Applications')
-        .setColor(getColor('info') || '#5865F2')
+        .setColor('#5865F2')
         .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true }))
         .setDescription(`Showing ${recent.length} application(s). Most recent first.`);
 
@@ -340,7 +332,6 @@ async function handleStatus(interaction) {
         const { emoji, label } = statusDisplay(app.status);
         const date = app.createdAt ? `<t:${Math.floor(new Date(app.createdAt).getTime() / 1000)}:R>` : 'Unknown';
         const reviewNote = app.reviewMessage && app.status !== 'pending' ? `\n> *${app.reviewMessage.substring(0, 80)}*` : '';
-
         embed.addFields({
             name: `${emoji} ${app.roleName ?? 'Unknown Role'}`,
             value: `**Status:** ${label}\n**ID:** \`${app.id}\`\n**Submitted:** ${date}${reviewNote}`,
@@ -350,8 +341,6 @@ async function handleStatus(interaction) {
 
     return InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
 }
-
-// ─── /application cancel ───────────────────────────────────────────────────
 
 async function handleCancel(interaction) {
     const apps = await getUserApplications(interaction.client, interaction.guild.id, interaction.user.id);
@@ -365,7 +354,6 @@ async function handleCancel(interaction) {
 
     let targetApp = pending[0];
 
-    // If multiple pending — let user pick
     if (pending.length > 1) {
         const select = new StringSelectMenuBuilder()
             .setCustomId('cancel_pick')
@@ -403,7 +391,6 @@ async function handleCancel(interaction) {
         targetApp = pending.find(a => a.id === sel.values[0]);
     }
 
-    // Confirm cancellation
     const confirmRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('confirm_cancel').setLabel('Yes, Cancel It').setStyle(ButtonStyle.Danger),
         new ButtonBuilder().setCustomId('abort_cancel').setLabel('Never mind').setStyle(ButtonStyle.Secondary),
@@ -439,7 +426,6 @@ async function handleCancel(interaction) {
         reviewedAt: new Date().toISOString(),
     });
 
-    // Update log embed if exists
     if (targetApp.logMessageId && targetApp.logChannelId) {
         try {
             const logChannel = interaction.guild.channels.cache.get(targetApp.logChannelId);
@@ -463,8 +449,6 @@ async function handleCancel(interaction) {
     });
 }
 
-// ─── /application setup ────────────────────────────────────────────────────
-
 async function handleSetup(interaction) {
     await checkManagerPermission(interaction.client, interaction.guild.id, interaction.member);
 
@@ -479,15 +463,15 @@ async function handleSetup(interaction) {
                 .setPlaceholder('Right-click the role → Copy ID').setMaxLength(20).setRequired(true),
         ),
         new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('question_1').setLabel('Question 1').setStyle(TextInputStyle.Short)
-                .setPlaceholder('Why do you want this role?').setMaxLength(100).setRequired(true),
+            new TextInputBuilder().setCustomId('question_1').setLabel('Custom Question 1 (optional)').setStyle(TextInputStyle.Short)
+                .setPlaceholder('Leave blank to use the 9 default questions').setMaxLength(100).setRequired(false),
         ),
         new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('question_2').setLabel('Question 2 (optional)').setStyle(TextInputStyle.Short)
-                .setPlaceholder('What experience do you have?').setMaxLength(100).setRequired(false),
+            new TextInputBuilder().setCustomId('question_2').setLabel('Custom Question 2 (optional)').setStyle(TextInputStyle.Short)
+                .setMaxLength(100).setRequired(false),
         ),
         new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('question_3').setLabel('Question 3 (optional)').setStyle(TextInputStyle.Short)
+            new TextInputBuilder().setCustomId('question_3').setLabel('Custom Question 3 (optional)').setStyle(TextInputStyle.Short)
                 .setMaxLength(100).setRequired(false),
         ),
     );
@@ -504,7 +488,7 @@ async function handleSetup(interaction) {
 
     const appName = submitted.fields.getTextInputValue('app_name').trim();
     const roleId  = submitted.fields.getTextInputValue('role_id').trim();
-    const questions = [
+    const customQuestions = [
         submitted.fields.getTextInputValue('question_1').trim(),
         submitted.fields.getTextInputValue('question_2').trim(),
         submitted.fields.getTextInputValue('question_3').trim(),
@@ -530,9 +514,8 @@ async function handleSetup(interaction) {
     existing.push({ roleId, name: appName, enabled: true });
     await saveApplicationRoles(interaction.client, interaction.guild.id, existing);
 
-    // Pre-load default questions — any from the setup modal override them
-    const finalQuestions = questions.length > 0
-        ? [...questions, ...DEFAULT_QUESTIONS.slice(questions.length)]
+    const finalQuestions = customQuestions.length > 0
+        ? [...customQuestions, ...DEFAULT_QUESTIONS.slice(customQuestions.length)]
         : DEFAULT_QUESTIONS;
 
     await saveApplicationRoleSettings(interaction.client, interaction.guild.id, roleId, { questions: finalQuestions });
@@ -548,26 +531,22 @@ async function handleSetup(interaction) {
         .setThumbnail(interaction.guild.iconURL({ dynamic: true }))
         .setDescription(
             `**${appName}** is now open and accepting applications for ${role}.\n\n` +
-            `📋 **${finalQuestions.length} questions** pre-loaded — members will answer them in two steps.\n\n` +
+            `📋 **${finalQuestions.length} questions** loaded — members answer them in two steps.\n\n` +
             `💡 **Next steps:**\n` +
             `> • Set a log channel: \`/application configure name:${appName}\`\n` +
-            `> • Set a staff ping role, banner, eligibility rules, and more from the same command.`,
+            `> • Set a staff ping role, banner, eligibility rules, and more.`,
         )
-        .addFields(
-            {
-                name: '📝 Questions Preview',
-                value: finalQuestions.slice(0, 5).map((q, i) => `**${i + 1}.** ${q}`).join('\n') +
-                    (finalQuestions.length > 5 ? `\n*...and ${finalQuestions.length - 5} more*` : ''),
-                inline: false,
-            },
-        )
+        .addFields({
+            name: '📝 Questions Preview',
+            value: finalQuestions.slice(0, 5).map((q, i) => `**${i + 1}.** ${q}`).join('\n') +
+                (finalQuestions.length > 5 ? `\n*...and ${finalQuestions.length - 5} more*` : ''),
+            inline: false,
+        })
         .setFooter({ text: `${interaction.guild.name} • Application System` })
         .setTimestamp();
 
     await submitted.reply({ embeds: [embed], flags: ['Ephemeral'] });
 }
-
-// ─── /application configure ────────────────────────────────────────────────
 
 async function handleConfigure(interaction) {
     await checkManagerPermission(interaction.client, interaction.guild.id, interaction.member);
@@ -583,13 +562,8 @@ async function handleConfigure(interaction) {
     }
 
     const { embed, selectRow } = await buildConfigPanel(interaction.client, interaction.guild, appRole.roleId);
-    return InteractionHelper.safeEditReply(interaction, {
-        embeds: [embed],
-        components: [selectRow],
-    });
+    return InteractionHelper.safeEditReply(interaction, { embeds: [embed], components: [selectRow] });
 }
-
-// ─── /application list ─────────────────────────────────────────────────────
 
 async function handleList(interaction) {
     await checkManagerPermission(interaction.client, interaction.guild.id, interaction.member);
@@ -602,7 +576,6 @@ async function handleList(interaction) {
     if (userFilter) apps = apps.filter(a => a.userId === userFilter.id);
     if (roleFilter) apps = apps.filter(a => a.roleName?.toLowerCase().includes(roleFilter.toLowerCase()));
 
-    // Auto-clean apps from users who left
     if (!userFilter) {
         const checked = await Promise.all(
             apps.map(async app => {
@@ -641,8 +614,6 @@ async function handleList(interaction) {
     return InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
 }
 
-// ─── /application review ───────────────────────────────────────────────────
-
 async function handleReview(interaction) {
     await checkManagerPermission(interaction.client, interaction.guild.id, interaction.member);
 
@@ -656,46 +627,33 @@ async function handleReview(interaction) {
     }
 
     const { emoji, label, color } = statusDisplay(app.status);
-
     const embed = new EmbedBuilder()
         .setTitle(`📋 Application — ${app.roleName ?? 'Unknown Role'}`)
         .setColor(color)
         .setAuthor({ name: app.username ?? 'Unknown', iconURL: app.avatar ?? undefined })
         .addFields(
-            { name: '👤 Applicant',  value: `<@${app.userId}>`, inline: true },
-            { name: '📊 Status',     value: `${emoji} ${label}`, inline: true },
-            { name: '🆔 ID',         value: `\`${app.id}\``, inline: true },
-            { name: '📅 Submitted',  value: app.createdAt ? `<t:${Math.floor(new Date(app.createdAt).getTime() / 1000)}:F>` : 'Unknown', inline: true },
+            { name: '👤 Applicant', value: `<@${app.userId}>`, inline: true },
+            { name: '📊 Status',    value: `${emoji} ${label}`, inline: true },
+            { name: '🆔 ID',        value: `\`${app.id}\``, inline: true },
+            { name: '📅 Submitted', value: app.createdAt ? `<t:${Math.floor(new Date(app.createdAt).getTime() / 1000)}:F>` : 'Unknown', inline: true },
         )
         .setThumbnail(app.avatar ?? null)
         .setTimestamp();
 
-    if (app.reviewerId) {
-        embed.addFields({ name: '👮 Reviewed By', value: `<@${app.reviewerId}>`, inline: true });
-    }
-    if (app.reviewMessage) {
-        embed.addFields({ name: '💬 Review Note', value: app.reviewMessage, inline: false });
-    }
+    if (app.reviewerId) embed.addFields({ name: '👮 Reviewed By', value: `<@${app.reviewerId}>`, inline: true });
+    if (app.reviewMessage) embed.addFields({ name: '💬 Review Note', value: app.reviewMessage, inline: false });
 
-    // Q&A
     if (app.answers?.length) {
         embed.addFields({ name: '\u200B', value: '**── Answers ──**', inline: false });
         app.answers.forEach((item, i) => {
-            embed.addFields({
-                name: `Q${i + 1}: ${item.question}`,
-                value: item.answer || '*No answer*',
-                inline: false,
-            });
+            embed.addFields({ name: `Q${i + 1}: ${item.question}`, value: item.answer || '*No answer*', inline: false });
         });
     }
 
-    // Internal notes
     if (app.notes?.length) {
         embed.addFields({
             name: `📝 Internal Notes (${app.notes.length})`,
-            value: app.notes.map(n =>
-                `**${n.authorTag ?? 'Staff'}** <t:${Math.floor(n.createdAt / 1000)}:R>\n> ${n.content}`,
-            ).join('\n\n').substring(0, 1024),
+            value: app.notes.map(n => `**${n.authorTag ?? 'Staff'}** <t:${Math.floor(n.createdAt / 1000)}:R>\n> ${n.content}`).join('\n\n').substring(0, 1024),
             inline: false,
         });
     }
@@ -706,8 +664,6 @@ async function handleReview(interaction) {
         ...(buttons ? { components: [buttons] } : {}),
     });
 }
-
-// ─── /application history ──────────────────────────────────────────────────
 
 async function handleHistory(interaction) {
     await checkManagerPermission(interaction.client, interaction.guild.id, interaction.member);
@@ -722,27 +678,20 @@ async function handleHistory(interaction) {
     }
 
     const sorted = apps.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-
     const embed = new EmbedBuilder()
         .setTitle(`📁 Application History — ${targetUser.tag}`)
-        .setColor(getColor('info') || '#5865F2')
+        .setColor('#5865F2')
         .setThumbnail(targetUser.displayAvatarURL({ dynamic: true }))
         .setDescription(`**${sorted.length}** application(s) total.`);
 
     sorted.slice(0, 12).forEach(app => {
         const { emoji, label } = statusDisplay(app.status);
         const date = app.createdAt ? `<t:${Math.floor(new Date(app.createdAt).getTime() / 1000)}:d>` : '?';
-        embed.addFields({
-            name: `${emoji} ${app.roleName ?? 'Unknown'}`,
-            value: `${label} • ${date}\n\`${app.id}\``,
-            inline: true,
-        });
+        embed.addFields({ name: `${emoji} ${app.roleName ?? 'Unknown'}`, value: `${label} • ${date}\n\`${app.id}\``, inline: true });
     });
 
     return InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
 }
-
-// ─── /application settings ─────────────────────────────────────────────────
 
 async function handleSettings(interaction) {
     await checkManagerPermission(interaction.client, interaction.guild.id, interaction.member);
@@ -770,38 +719,31 @@ async function handleSettings(interaction) {
     }
 
     if (!lines.length) {
-        // Show current settings
         const s = await getApplicationSettings(interaction.client, interaction.guild.id);
         const roles = await getApplicationRoles(interaction.client, interaction.guild.id);
-
         const embed = new EmbedBuilder()
             .setTitle('⚙️ Global Application Settings')
-            .setColor(getColor('info') || '#5865F2')
+            .setColor('#5865F2')
             .addFields(
-                { name: 'System',          value: s.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
-                { name: 'Default Log',     value: s.logChannelId ? `<#${s.logChannelId}>` : 'Not set', inline: true },
-                { name: 'Manager Roles',   value: s.managerRoles?.length ? s.managerRoles.map(r => `<@&${r}>`).join(', ') : 'None (Manage Server)', inline: false },
-                { name: 'Default Banner',  value: s.imageUrl ? `[Preview](${s.imageUrl})` : 'Not set', inline: true },
+                { name: 'System',        value: s.enabled ? '✅ Enabled' : '❌ Disabled', inline: true },
+                { name: 'Default Log',   value: s.logChannelId ? `<#${s.logChannelId}>` : 'Not set', inline: true },
+                { name: 'Manager Roles', value: s.managerRoles?.length ? s.managerRoles.map(r => `<@&${r}>`).join(', ') : 'None (Manage Server)', inline: false },
+                { name: 'Default Banner',value: s.imageUrl ? `[Preview](${s.imageUrl})` : 'Not set', inline: true },
                 {
                     name: `Applications (${roles.length})`,
-                    value: roles.length
-                        ? roles.map(r => `• **${r.name}** ${r.enabled !== false ? '✅' : '❌'}`).join('\n')
-                        : 'None — use `/application setup` to create one.',
+                    value: roles.length ? roles.map(r => `• **${r.name}** ${r.enabled !== false ? '✅' : '❌'}`).join('\n') : 'None — use `/application setup` to create one.',
                     inline: false,
                 },
             )
             .setFooter({ text: 'Use /application configure to edit per-role settings' });
-
         return InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
     }
 
     await saveApplicationSettings(interaction.client, interaction.guild.id, updates);
     return InteractionHelper.safeEditReply(interaction, {
-        embeds: [new EmbedBuilder().setTitle('✅ Settings Updated').setDescription(lines.join('\n')).setColor(getColor('success') || '#57F287')],
+        embeds: [new EmbedBuilder().setTitle('✅ Settings Updated').setDescription(lines.join('\n')).setColor('#57F287')],
     });
 }
-
-// ─── /application remove ───────────────────────────────────────────────────
 
 async function handleRemove(interaction) {
     await checkManagerPermission(interaction.client, interaction.guild.id, interaction.member);
@@ -820,11 +762,6 @@ async function handleRemove(interaction) {
     await saveApplicationRoles(interaction.client, interaction.guild.id, existing);
 
     return InteractionHelper.safeEditReply(interaction, {
-        embeds: [
-            new EmbedBuilder()
-                .setTitle('🗑️ Application Removed')
-                .setDescription(`**${removed.name}** has been removed. Existing submissions are kept in the database.`)
-                .setColor(getColor('warning') || '#FEE75C'),
-        ],
+        embeds: [new EmbedBuilder().setTitle('🗑️ Application Removed').setDescription(`**${removed.name}** has been removed.`).setColor('#FEE75C')],
     });
 }
