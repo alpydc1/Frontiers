@@ -77,7 +77,7 @@ export async function buildLeaderboardEmbed(client, guild) {
     .setTitle(`🏆 ${guild.name} — Live Leaderboard`)
     .setThumbnail(guild.iconURL({ dynamic: true }) ?? null)
     .setTimestamp()
-    .setFooter({ text: `Auto-updates every 5 minutes · ${guild.name}` });
+    .setFooter({ text: `Auto-updates every 10 seconds · ${guild.name}` });
 
   if (xpBoard.length > 0) {
     const xpLines = await Promise.all(
