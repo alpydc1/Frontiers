@@ -232,7 +232,7 @@ class TitanBot extends Client {
     cron.schedule('0 6 * * *', () => checkBirthdays(this));
     cron.schedule('* * * * *', () => checkGiveaways(this));
     cron.schedule('*/15 * * * *', () => this.updateAllCounters());
-    cron.schedule('*/5 * * * *', () => updateAllLiveLeaderboards(this));
+    cron.schedule('*/10 * * * * *', () => updateAllLiveLeaderboards(this));
   }
 
   async updateAllCounters() {
